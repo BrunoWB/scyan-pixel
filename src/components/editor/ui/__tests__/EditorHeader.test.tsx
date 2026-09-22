@@ -32,7 +32,6 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
     onExportPNG: vi.fn(),
     onExportCArray: vi.fn(),
     onExportJSON: vi.fn(),
-    onFitToView: vi.fn(),
   };
 
   it('renders HeroUI NumberField component with current brush size', () => {
@@ -71,5 +70,12 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
     expect(html).not.toContain('<button>2</button>');
     expect(html).not.toContain('<button>3</button>');
     expect(html).not.toContain('<button>4</button>');
+  });
+
+  it('renders modern unified Export button and removes fragmented export buttons', () => {
+    const html = renderToString(<EditorHeader {...defaultProps} />);
+
+    expect(html).toContain('Export');
+    expect(html).not.toContain('<span>PNG</span>');
   });
 });

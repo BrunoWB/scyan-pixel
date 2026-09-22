@@ -576,3 +576,36 @@
   background: rgba(0, 229, 163, 0.1);
 }
 
+.image-import-mode-toggle {
+  display: flex;
+  align-items: center;
+  background: #0f1115;
+  border: 1px solid #1e232d;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+  width: fit-content;
+}
+
+.image-import-mode-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.image-import-mode-btn:hover {
+  color: #f8fafc;
+}
+
+.image-import-mode-btn.active {
+  background: var(--accent, #00e5a3);
+  color: #0b0d11;
+  font-weight: 600;
+}
+

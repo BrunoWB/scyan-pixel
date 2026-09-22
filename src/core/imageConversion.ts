@@ -1,4 +1,12 @@
 import { BwpxGrid } from './PixelGrid';
+import { rgbToHex } from './colorUtils';
+
+export interface ContentBoundingBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
 export interface ImageConversionOptions {
   threshold: number; // 0 - 255
@@ -6,6 +14,7 @@ export interface ImageConversionOptions {
   targetWidth?: number;
   targetHeight?: number;
   color?: string;
+  colorMode?: boolean;
   crop?: {
     x: number;
     y: number;
@@ -15,13 +24,14 @@ export interface ImageConversionOptions {
 }
 
 /**
- * Converts ImageData to a BwpxGrid using perceptual luminance thresholding (ITU-R BT.601).
+ * Converts ImageData to a BwpxGrid using perceptual luminance thresholding (ITU-R BT.601),
+ * or retains RGB colors for non-transparent pixels when colorMode is true.
  */
 export function convertImageDataToGrid(
   imageData: ImageData,
   options: ImageConversionOptions
 ): BwpxGrid {
-  const { threshold, invert = false, color } = options;
+  const { threshold, invert = false, color, colorMode = false } = options;
   const width = imageData.width;
   const height = imageData.height;
   const data = imageData.data;
@@ -34,6 +44,14 @@ export function convertImageDataToGrid(
       const g = data[idx + 1];
       const b = data[idx + 2];
       const a = data[idx + 3];
+
+      if (colorMode) {
+        if (a >= 32) {
+          const hex = rgbToHex(r, g, b);
+          grid.set(x, y, 1, hex);
+        }
+        continue;
+      }
 
       // If pixel is transparent, consider off unless inverted
       if (a < 64) {
@@ -58,6 +76,193 @@ export function convertImageDataToGrid(
   }
 
   return grid;
+}
+
+/**
+ * Intelligent auto-snapping to content:
+ * - Detects transparent pixels (alpha < 32) as background if transparency is present.
+ * - For opaque images (JPEG, opaque GIF/PNG), samples corners/perimeter to detect near-white (> 235),
+ *   near-black (< 25), or uniform solid background color.
+ * - For multi-frame GIFs, evaluates all frames and computes the union bounding box [minX, minY, maxX, maxY].
+ */
+export function detectContentBoundingBox(
+  frames: { width: number; height: number; rgba: Uint8ClampedArray | Uint8Array }[]
+): ContentBoundingBox | null {
+  if (!frames || frames.length === 0) return null;
+  const w = frames[0].width;
+  const h = frames[0].height;
+  if (w <= 0 || h <= 0) return null;
+
+  // 1. Check if transparency is present in any frame
+  let hasTransparency = false;
+  for (const frame of frames) {
+    const data = frame.rgba;
+    const len = frame.width * frame.height * 4;
+    for (let i = 3; i < len; i += 4) {
+      if (data[i] < 32) {
+        hasTransparency = true;
+        break;
+      }
+    }
+    if (hasTransparency) break;
+  }
+
+  let isContent: (r: number, g: number, b: number, a: number) => boolean;
+
+  if (hasTransparency) {
+    isContent = (_r, _g, _b, a) => a >= 32;
+  } else {
+    // 2. Opaque images: sample corners and perimeter
+    const frame0 = frames[0];
+    const data0 = frame0.rgba;
+    const f0W = frame0.width;
+    const f0H = frame0.height;
+
+    const cornerCoords = [
+      [0, 0],
+      [f0W - 1, 0],
+      [0, f0H - 1],
+      [f0W - 1, f0H - 1],
+    ];
+
+    const uniqueCorners = cornerCoords.filter(
+      ([cx, cy], idx, arr) => arr.findIndex(([x, y]) => x === cx && y === cy) === idx
+    );
+
+    const cornerColors = uniqueCorners.map(([cx, cy]) => {
+      const idx = (cy * f0W + cx) * 4;
+      return {
+        r: data0[idx],
+        g: data0[idx + 1],
+        b: data0[idx + 2],
+      };
+    });
+
+    const isNearWhite = (r: number, g: number, b: number) =>
+      (r > 235 && g > 235 && b > 235) || 0.299 * r + 0.587 * g + 0.114 * b > 235;
+
+    const isNearBlack = (r: number, g: number, b: number) =>
+      (r < 25 && g < 25 && b < 25) || 0.299 * r + 0.587 * g + 0.114 * b < 25;
+
+    const nearWhiteCorners = cornerColors.filter((c) => isNearWhite(c.r, c.g, c.b)).length;
+    const nearBlackCorners = cornerColors.filter((c) => isNearBlack(c.r, c.g, c.b)).length;
+    const majorityThreshold = Math.ceil(cornerColors.length * 0.75);
+
+    let perimeterNearWhite = 0;
+    let perimeterNearBlack = 0;
+    let perimeterTotal = 0;
+    const perimeterSamples: { r: number; g: number; b: number }[] = [];
+
+    const stepX = Math.max(1, Math.floor(f0W / 100));
+    const stepY = Math.max(1, Math.floor(f0H / 100));
+
+    for (let x = 0; x < f0W; x += stepX) {
+      const yCoords = f0H > 1 ? [0, f0H - 1] : [0];
+      for (const y of yCoords) {
+        const idx = (y * f0W + x) * 4;
+        const r = data0[idx];
+        const g = data0[idx + 1];
+        const b = data0[idx + 2];
+        if (isNearWhite(r, g, b)) perimeterNearWhite++;
+        if (isNearBlack(r, g, b)) perimeterNearBlack++;
+        perimeterTotal++;
+        perimeterSamples.push({ r, g, b });
+      }
+    }
+    if (f0H > 2) {
+      for (let y = stepY; y < f0H - 1; y += stepY) {
+        const xCoords = f0W > 1 ? [0, f0W - 1] : [0];
+        for (const x of xCoords) {
+          const idx = (y * f0W + x) * 4;
+          const r = data0[idx];
+          const g = data0[idx + 1];
+          const b = data0[idx + 2];
+          if (isNearWhite(r, g, b)) perimeterNearWhite++;
+          if (isNearBlack(r, g, b)) perimeterNearBlack++;
+          perimeterTotal++;
+          perimeterSamples.push({ r, g, b });
+        }
+      }
+    }
+
+    if (nearWhiteCorners >= majorityThreshold || (perimeterTotal > 0 && perimeterNearWhite / perimeterTotal >= 0.75)) {
+      isContent = (r, g, b) => !isNearWhite(r, g, b);
+    } else if (nearBlackCorners >= majorityThreshold || (perimeterTotal > 0 && perimeterNearBlack / perimeterTotal >= 0.75)) {
+      isContent = (r, g, b) => !isNearBlack(r, g, b);
+    } else {
+      let matchedCornerColor: { r: number; g: number; b: number } | null = null;
+      for (const ref of cornerColors) {
+        const matching = cornerColors.filter(
+          (c) => Math.abs(c.r - ref.r) + Math.abs(c.g - ref.g) + Math.abs(c.b - ref.b) <= 24
+        ).length;
+        if (matching >= majorityThreshold) {
+          matchedCornerColor = ref;
+          break;
+        }
+      }
+
+      if (!matchedCornerColor && perimeterSamples.length > 0) {
+        for (const ref of cornerColors) {
+          const matchCount = perimeterSamples.filter(
+            (c) => Math.abs(c.r - ref.r) + Math.abs(c.g - ref.g) + Math.abs(c.b - ref.b) <= 24
+          ).length;
+          if (matchCount / perimeterSamples.length >= 0.7) {
+            matchedCornerColor = ref;
+            break;
+          }
+        }
+      }
+
+      if (matchedCornerColor) {
+        const bgR = matchedCornerColor.r;
+        const bgG = matchedCornerColor.g;
+        const bgB = matchedCornerColor.b;
+        isContent = (r, g, b) => Math.abs(r - bgR) + Math.abs(g - bgG) + Math.abs(b - bgB) > 24;
+      } else {
+        return { x: 0, y: 0, w, h };
+      }
+    }
+  }
+
+  // 3. Union bounding box across all frames
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (const frame of frames) {
+    const data = frame.rgba;
+    const fw = frame.width;
+    const fh = frame.height;
+    for (let y = 0; y < fh; y++) {
+      const rowOffset = y * fw * 4;
+      for (let x = 0; x < fw; x++) {
+        const idx = rowOffset + x * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const a = data[idx + 3];
+
+        if (isContent(r, g, b, a)) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return { x: 0, y: 0, w, h };
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    w: maxX - minX + 1,
+    h: maxY - minY + 1,
+  };
 }
 
 /**

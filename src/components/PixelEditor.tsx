@@ -107,7 +107,6 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     setIsPanning,
     panStart,
     setPanStart,
-    fitToView,
     getGridCoords,
     handleWheel,
   } = useViewport({ containerRef });
@@ -139,6 +138,20 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const [drawButton, setDrawButton] = useState<number>(0);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
   const [ghost, setGhost] = useState<GhostOverlay | null>(null);
+  const [ghostPlacement, setGhostPlacement] = useState<{
+    grid: BwpxGrid;
+    width: number;
+    height: number;
+    pixels: ([number, number] | [number, number, string])[];
+    x: number;
+    y: number;
+    rects?: { x: number; y: number; w: number; h: number }[];
+    gifData?: { frames: { grid: BwpxGrid; delayMs: number }[]; name?: string };
+  } | null>(null);
+  const ghostPlacementRef = useRef(ghostPlacement);
+  useEffect(() => {
+    ghostPlacementRef.current = ghostPlacement;
+  }, [ghostPlacement]);
 
   const currentCoordsRef = useRef<{ x: number; y: number } | null>(null);
   const isDrawingRef = useRef<boolean>(false);
@@ -207,6 +220,22 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.name.endsWith('.json') || file.type === 'application/json') {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const data = JSON.parse(ev.target?.result as string);
+            if (data && typeof data.width === 'number' && typeof data.height === 'number') {
+              const newGrid = new PixelGrid(data.width, data.height, data.pixels, data.coloredPixels);
+              commitGrid(newGrid);
+            }
+          } catch (err) {
+            console.error('Failed to parse JSON project file:', err);
+          }
+        };
+        reader.readAsText(file);
+        return;
+      }
       setImportSource(file);
       setIsImportModalOpen(true);
     }
@@ -265,24 +294,53 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         hoverPos,
         brushIndicatorColor: activeDrawColor,
         brushSize,
-        showBrushIndicator: activeTool === 'pencil' || activeTool === 'eraser',
+        showBrushIndicator: (activeTool === 'pencil' || activeTool === 'eraser') && !ghostPlacement,
         frameBounds: null,
-        ghost,
+        ghost: ghost || (ghostPlacement ? {
+          pixels: ghostPlacement.pixels,
+          x: ghostPlacement.x,
+          y: ghostPlacement.y,
+          w: ghostPlacement.width,
+          h: ghostPlacement.height,
+          rects: ghostPlacement.rects
+            ? ghostPlacement.rects.map((r) => ({
+                x: ghostPlacement.x + r.x,
+                y: ghostPlacement.y + r.y,
+                w: r.w,
+                h: r.h,
+              }))
+            : undefined,
+          showOutline: true,
+          showBackdrop: false,
+        } : null),
         selection,
         bgColor: activeBgColor,
       });
       overlayRafRef.current = null;
     });
-  }, [zoom, pan, hoverPos, activeDrawColor, brushSize, activeTool, ghost, selection, activeBgColor]);
+  }, [zoom, pan, hoverPos, activeDrawColor, brushSize, activeTool, ghost, ghostPlacement, selection, activeBgColor]);
 
   useEffect(() => {
     scheduleOverlayRender();
   }, [scheduleOverlayRender]);
 
+  const handleSaveJSONFileRef = useRef<() => void>(() => {});
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (modalContent || isImportModalOpen) return;
+
+      if (e.key === 'Escape') {
+        if (ghostPlacementRef.current) {
+          setGhostPlacement(null);
+          return;
+        }
+        if (selection && selection.active) {
+          setSelection(null);
+          return;
+        }
+      }
 
       if (['Shift', 'Control', 'Meta'].includes(e.key)) {
         if (isDrawingRef.current && startPosRef.current && currentCoordsRef.current) {
@@ -364,6 +422,13 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       if (e.key === ']') {
         e.preventDefault();
         setBrushSize((prev) => Math.min(64, prev + 1));
+        return;
+      }
+
+      // Save shortcut: Ctrl+S / Cmd+S
+      if ((e.ctrlKey || e.metaKey) && k === 's') {
+        e.preventDefault();
+        handleSaveJSONFileRef.current?.();
         return;
       }
 
@@ -503,6 +568,43 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
   // Pointer Interaction Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (ghostPlacementRef.current) {
+      if (e.button === 0) {
+        const gp = ghostPlacementRef.current;
+        const targetX = gp.x;
+        const targetY = gp.y;
+        const next = grid.clone();
+        if (gp.gifData && gp.gifData.frames.length > 0) {
+          const frameW = Math.round(gp.width / gp.gifData.frames.length);
+          gp.gifData.frames.forEach((frame, i) => {
+            next.blit(frame.grid, targetX + i * frameW, targetY, true);
+          });
+          commitGrid(next);
+          setSelection({
+            x: targetX,
+            y: targetY,
+            w: gp.width,
+            h: gp.height,
+            active: true,
+          });
+        } else {
+          next.blit(gp.grid, targetX, targetY, true);
+          commitGrid(next);
+          setSelection({
+            x: targetX,
+            y: targetY,
+            w: gp.width,
+            h: gp.height,
+            active: true,
+          });
+        }
+        setGhostPlacement(null);
+      } else if (e.button === 2) {
+        setGhostPlacement(null);
+      }
+      return;
+    }
+
     if (e.button === 2) {
       if (activeTool === 'pencil') {
         const coords = getGridCoords(e.clientX, e.clientY);
@@ -619,6 +721,19 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     const coords = getGridCoords(e.clientX, e.clientY);
     setHoverPos(coords);
     currentCoordsRef.current = coords;
+
+    if (ghostPlacementRef.current) {
+      setGhostPlacement((prev) =>
+        prev
+          ? {
+              ...prev,
+              x: coords.x - Math.floor(prev.width / 2),
+              y: coords.y - Math.floor(prev.height / 2),
+            }
+          : null
+      );
+      return;
+    }
 
     if (isMovingSelection && moveStartPos && ghost && floatingPixels) {
       const dx = coords.x - moveStartPos.x;
@@ -760,24 +875,54 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   // Image Import Handler
   const handleImageImportConfirm = (
     importedGrid: BwpxGrid,
-    _w: number,
-    _h: number,
-    _gifData?: { frames: { grid: BwpxGrid; delayMs: number }[]; name?: string }
+    w: number,
+    h: number,
+    gifData?: { frames: { grid: BwpxGrid; delayMs: number }[]; name?: string }
   ) => {
-    const next = grid.clone();
     const container = containerRef.current;
     const vpW = container?.clientWidth || 400;
     const vpH = container?.clientHeight || 400;
-    const dstX = Math.round((-pan.x + vpW / 2) / zoom - importedGrid.width / 2);
-    const dstY = Math.round((-pan.y + vpH / 2) / zoom - importedGrid.height / 2);
-    next.blit(importedGrid, dstX, dstY, true);
-    commitGrid(next);
-    setSelection({
-      x: dstX,
-      y: dstY,
-      w: importedGrid.width,
-      h: importedGrid.height,
-      active: true,
+
+    const isMultiFrame = gifData && gifData.frames.length > 0;
+    const frameCount = isMultiFrame ? gifData.frames.length : 1;
+    const totalW = w * frameCount;
+
+    const initialX = hoverPos
+      ? hoverPos.x - Math.floor(totalW / 2)
+      : Math.round((-pan.x + vpW / 2) / zoom - totalW / 2);
+    const initialY = hoverPos
+      ? hoverPos.y - Math.floor(h / 2)
+      : Math.round((-pan.y + vpH / 2) / zoom - h / 2);
+
+    let ghostPixels: ([number, number] | [number, number, string])[] = [];
+    let rects: { x: number; y: number; w: number; h: number }[] | undefined = undefined;
+
+    if (isMultiFrame) {
+      rects = gifData.frames.map((_, i) => ({
+        x: i * w,
+        y: 0,
+        w,
+        h,
+      }));
+      gifData.frames.forEach((frame, i) => {
+        const framePix = frame.grid.getAllColoredPixels();
+        framePix.forEach(([rx, ry, col]) => {
+          ghostPixels.push([rx + i * w, ry, col]);
+        });
+      });
+    } else {
+      ghostPixels = importedGrid.getAllColoredPixels();
+    }
+
+    setGhostPlacement({
+      grid: importedGrid,
+      width: totalW,
+      height: h,
+      pixels: ghostPixels,
+      rects,
+      x: initialX,
+      y: initialY,
+      gifData,
     });
   };
 
@@ -862,6 +1007,48 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     setModalContent({ title: 'Export JSON Project', text: json });
   };
 
+  const handleSaveJSONFile = useCallback(() => {
+    const json = JSON.stringify(
+      {
+        width: grid.width,
+        height: grid.height,
+        pixels: grid.getAllPixels(),
+        coloredPixels: grid.getAllColoredPixels(),
+      },
+      null,
+      2
+    );
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `scyan_pixel_${grid.width}x${grid.height}_project.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [grid]);
+
+  const handleDownloadCHeader = useCallback(() => {
+    const bounds =
+      selection && selection.active
+        ? { width: selection.w, height: selection.h }
+        : grid.getBounds();
+    const w = bounds.width > 0 ? bounds.width : grid.width;
+    const h = bounds.height > 0 ? bounds.height : grid.height;
+    const cCode = grid.toCArray('CUSTOM_DISPLAY_BITMAP');
+    const headerContent = `#ifndef SCYAN_CUSTOM_DISPLAY_BITMAP_H\n#define SCYAN_CUSTOM_DISPLAY_BITMAP_H\n\n#include <stdint.h>\n\n${cCode}\n\n#endif // SCYAN_CUSTOM_DISPLAY_BITMAP_H\n`;
+    const blob = new Blob([headerContent], { type: 'text/x-c' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `scyan_bitmap_${w}x${h}.h`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [grid, selection]);
+
+  useEffect(() => {
+    handleSaveJSONFileRef.current = handleSaveJSONFile;
+  }, [handleSaveJSONFile]);
+
   return (
     <div
       className="flex flex-col h-screen w-screen font-mono-code select-none overflow-hidden"
@@ -874,11 +1061,31 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       }}
       onDrop={(e) => {
         const file = e.dataTransfer.files?.[0];
-        if (file && (file.type.startsWith('image/') || /\.(png|jpe?g|gif|bmp|webp)$/i.test(file.name))) {
-          e.preventDefault();
-          e.stopPropagation();
-          setImportSource(file);
-          setIsImportModalOpen(true);
+        if (file) {
+          if (file.name.endsWith('.json') || file.type === 'application/json') {
+            e.preventDefault();
+            e.stopPropagation();
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              try {
+                const data = JSON.parse(ev.target?.result as string);
+                if (data && typeof data.width === 'number' && typeof data.height === 'number') {
+                  const newGrid = new PixelGrid(data.width, data.height, data.pixels, data.coloredPixels);
+                  commitGrid(newGrid);
+                }
+              } catch (err) {
+                console.error('Failed to parse JSON project file:', err);
+              }
+            };
+            reader.readAsText(file);
+            return;
+          }
+          if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|bmp|webp)$/i.test(file.name)) {
+            e.preventDefault();
+            e.stopPropagation();
+            setImportSource(file);
+            setIsImportModalOpen(true);
+          }
         }
       }}
     >
@@ -912,7 +1119,10 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onExportPNG={handleExportPNG}
         onExportCArray={handleExportCArray}
         onExportJSON={handleExportJSON}
-        onFitToView={() => fitToView(grid)}
+        onSaveJSONFile={handleSaveJSONFile}
+        onDownloadCHeader={handleDownloadCHeader}
+        selectionBounds={selection && selection.active ? { width: selection.w, height: selection.h } : null}
+        canvasDimensions={{ width: grid.width, height: grid.height }}
       />
 
       {/* 2. MAIN WORKSPACE */}
@@ -1015,7 +1225,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".png,.bmp,.jpg,.jpeg,.webp,.gif,image/png,image/bmp,image/jpeg,image/webp,image/gif"
+        accept=".png,.bmp,.jpg,.jpeg,.webp,.gif,.json,image/png,image/bmp,image/jpeg,image/webp,image/gif,application/json"
         onChange={handleFileInputChange}
         style={{ display: 'none' }}
         aria-hidden="true"

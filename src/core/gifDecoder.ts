@@ -230,6 +230,7 @@ export function convertGifFramesToGrids(
       targetWidth: targetW,
       targetHeight: targetH,
       color: options.color,
+      colorMode: options.colorMode,
     });
 
     return {

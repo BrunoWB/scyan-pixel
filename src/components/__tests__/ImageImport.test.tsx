@@ -33,6 +33,40 @@ describe('ImageImportModal', () => {
 
     expect(html).toBe('');
   });
+
+  it('renders color mode toggle when allowColor is true and hides threshold slider by default', () => {
+    const html = renderToString(
+      <ImageImportModal
+        isOpen={true}
+        imageSource={null}
+        allowColor={true}
+        onClose={() => {}}
+        onConfirm={() => {}}
+      />
+    );
+
+    expect(html).toContain('image-import-mode-toggle');
+    expect(html).toContain('Color');
+    expect(html).toContain('1bpp Monochrome');
+    // In default Color mode, threshold slider is hidden
+    expect(html).not.toContain('image-import-slider');
+  });
+
+  it('does not render mode toggle when allowColor is false and shows threshold slider', () => {
+    const html = renderToString(
+      <ImageImportModal
+        isOpen={true}
+        imageSource={null}
+        allowColor={false}
+        onClose={() => {}}
+        onConfirm={() => {}}
+      />
+    );
+
+    expect(html).not.toContain('image-import-mode-toggle');
+    expect(html).toContain('Threshold');
+    expect(html).toContain('image-import-slider');
+  });
 });
 
 describe('BwpxEditor file input', () => {
@@ -75,7 +109,6 @@ describe('EditorHeader import button', () => {
         onExportPNG={() => {}}
         onExportCArray={() => {}}
         onExportJSON={() => {}}
-        onFitToView={() => {}}
       />
     );
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { NumberField } from '@heroui/react';
 import {
   Undo2,
@@ -6,14 +6,13 @@ import {
   RotateCw,
   FlipHorizontal,
   FlipVertical,
-  Maximize2,
   Upload,
-  ChevronDown,
 } from 'lucide-react';
 import { BrandIdentityLogo, BrandWolfMascot } from '../../brand/BrandIdentityLogo';
 import { ColorPicker } from '../../ColorPicker';
 import { RecentPalette, type RecentPaletteHandle } from '../../RecentPalette';
 import { BackgroundPicker } from '../../BackgroundPicker';
+import { SaveExportMenu } from './SaveExportMenu';
 
 export interface EditorHeaderProps {
   title?: string;
@@ -49,7 +48,10 @@ export interface EditorHeaderProps {
   onExportPNG: (type: 'colored' | 'monochrome' | 'transparent') => void;
   onExportCArray: () => void;
   onExportJSON: () => void;
-  onFitToView: () => void;
+  onSaveJSONFile?: () => void;
+  onDownloadCHeader?: () => void;
+  selectionBounds?: { width: number; height: number } | null;
+  canvasDimensions?: { width: number; height: number };
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -81,9 +83,11 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   onExportPNG,
   onExportCArray,
   onExportJSON,
-  onFitToView,
+  onSaveJSONFile,
+  onDownloadCHeader,
+  selectionBounds,
+  canvasDimensions,
 }) => {
-  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
 
   return (
     <header
@@ -214,7 +218,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         </div>
       </div>
 
-      {/* Right: Color Picker, Palettes, Themes, Import, Export, Fit */}
+      {/* Right: Color Picker, Palettes, Themes, Import, Export */}
       <div className="flex items-center gap-3 flex-shrink-0">
         {!isStrictMonochrome && (
           <div className="flex items-center gap-2">
@@ -257,64 +261,16 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           <span className="hidden sm:inline">Import</span>
         </button>
 
-        {/* Export Group */}
-        <div className="relative">
-          <div className="flex items-center bg-[#181c26] border border-[#2d3548] rounded overflow-hidden">
-            <button
-              onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
-              className="px-2 py-0.5 text-xs text-slate-300 hover:text-white flex items-center gap-1 transition cursor-pointer"
-            >
-              <span>PNG</span>
-              <ChevronDown className="w-3 h-3 text-slate-500" />
-            </button>
-            <button
-              onClick={onExportCArray}
-              className="px-2 py-0.5 text-xs text-slate-400 hover:text-white transition cursor-pointer"
-            >
-              C Array
-            </button>
-            <button
-              onClick={onExportJSON}
-              className="px-2 py-0.5 text-xs text-slate-400 hover:text-white transition cursor-pointer"
-            >
-              JSON
-            </button>
-          </div>
-
-          {exportDropdownOpen && (
-            <div
-              className="absolute right-0 top-8 w-44 bg-[#14171e] border border-[#29303e] rounded-lg shadow-2xl p-1 z-50 flex flex-col gap-0.5"
-              onClick={() => setExportDropdownOpen(false)}
-            >
-              <button
-                onClick={() => onExportPNG('colored')}
-                className="px-2.5 py-1.5 text-xs rounded hover:bg-[#202735] text-left text-slate-200 transition cursor-pointer"
-              >
-                PNG (Colored)
-              </button>
-              <button
-                onClick={() => onExportPNG('monochrome')}
-                className="px-2.5 py-1.5 text-xs rounded hover:bg-[#202735] text-left text-slate-200 transition cursor-pointer"
-              >
-                PNG (B&W 1bpp)
-              </button>
-              <button
-                onClick={() => onExportPNG('transparent')}
-                className="px-2.5 py-1.5 text-xs rounded hover:bg-[#202735] text-left text-slate-200 transition cursor-pointer"
-              >
-                PNG (Transparent)
-              </button>
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={onFitToView}
-          className="p-1.5 rounded hover:bg-[#202530] text-slate-400 hover:text-white transition cursor-pointer"
-          title="Fit to Screen"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
+        {/* Modern Save / Download / Export Menu */}
+        <SaveExportMenu
+          onExportPNG={onExportPNG}
+          onExportCArray={onExportCArray}
+          onExportJSON={onExportJSON}
+          onSaveJSONFile={onSaveJSONFile}
+          onDownloadCHeader={onDownloadCHeader}
+          selectionBounds={selectionBounds}
+          canvasDimensions={canvasDimensions}
+        />
       </div>
     </header>
   );
