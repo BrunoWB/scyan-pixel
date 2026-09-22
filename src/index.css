@@ -1,5 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
+@import "@heroui/styles";
 
 :root {
   --bg-dark: #0f1013;
@@ -24,7 +25,7 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   background-color: var(--bg-dark);
   color: var(--text-main);
   overflow: hidden;
@@ -91,4 +92,45 @@ button {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
+}
+
+/* Brand Identity Animations */
+@keyframes pulseOrangeGlow {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes pulseOrangeReverse {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 1.2px #f59442) drop-shadow(0 0 2.5px rgba(245, 148, 66, 0.85));
+  }
+  50% {
+    opacity: 0.55;
+    filter: drop-shadow(0 0 0.3px rgba(245, 148, 66, 0.4));
+  }
+}
+
+@keyframes brandLineShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: -250% 50%;
+  }
+}
+
+@keyframes brandLineSlide {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
 }

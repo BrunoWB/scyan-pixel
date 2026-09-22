@@ -1,4 +1,4 @@
-name: Deploy BWPX Editor to GitHub Pages
+name: Deploy Scyan Pixel to GitHub Pages
 
 on:
   push:

@@ -1,8 +1,8 @@
-# bwpx-editor
+# Scyan Pixel
 
-A high-performance, lightweight 1-bit monochrome (0 or 1) HTML5 Canvas pixel editor component and web application. Designed for OLED displays (SSD1306, SH1106, e-ink, ZMK firmware), retro gaming, and icon/font authoring.
+A high-performance, lightweight pixel art and monochrome/color HTML5 Canvas pixel editor component and web application. Designed for OLED displays (SSD1306, SH1106, e-ink, ZMK firmware), custom palettes, retro gaming, and icon/font authoring.
 
-![OLED Pixel Editor UI](https://raw.githubusercontent.com/BrunoWB/bwpx-editor/main/public/preview.png)
+![Pixel Editor UI](https://raw.githubusercontent.com/BrunoWB/scyan-pixel/main/public/preview.png)
 
 ---
 
@@ -11,6 +11,7 @@ A high-performance, lightweight 1-bit monochrome (0 or 1) HTML5 Canvas pixel edi
 - **Fast Drawing Ergonomics**:
   - **Pencil**: Left-click to draw (1px, 2px, 3px, 4px).
   - **Fast Erase**: Right-click to erase without switching tools.
+  - **Color & Palettes**: Full HSV/HEX color picker, quick color swatches, and recent color history.
   - **Fast Selection**: Hold `Shift` and drag to create rectangular marquee selections.
   - **Pan & Zoom**: Spacebar + drag or middle-click to pan; scroll wheel to zoom (up to 6400% with crisp pixel gridlines).
 - **Drawing & Shape Toolkit**:
@@ -26,7 +27,7 @@ A high-performance, lightweight 1-bit monochrome (0 or 1) HTML5 Canvas pixel edi
   - Rotate 90° clockwise.
 - **Export / Import**:
   - **C 1bpp Byte Array**: Ready to paste into Zephyr / ZMK headers (`custom_display_assets.h`), formatted with hex bytes and visual ASCII row comments.
-  - **PNG Image**: Export 1-bit monochrome images or import any image with auto-thresholding.
+  - **PNG Image**: Export pixel art images or import any image with auto-thresholding or full color conversion.
   - **JSON Project**: Save and reload pixel grids.
 - **OLED Presets**:
   - 128×32 (Corne SSD1306 hardware landscape).
@@ -40,14 +41,14 @@ A high-performance, lightweight 1-bit monochrome (0 or 1) HTML5 Canvas pixel edi
 ## Embedding as a React Component
 
 ```tsx
-import { BwpxEditor, BwpxGrid } from 'bwpx-editor';
+import { ScyanPixelEditor, BwpxGrid } from 'scyan-pixel-editor';
 
 function MyStudio() {
   return (
-    <BwpxEditor
+    <ScyanPixelEditor
       initialWidth={128}
       initialHeight={32}
-      title="CUSTOM OLED EDITOR"
+      title="SCYAN PIXEL EDITOR"
       onGridChange={(grid) => {
         console.log("C Code:", grid.toCArray("MY_BITMAP"));
       }}

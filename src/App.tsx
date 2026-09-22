@@ -1,7 +1,7 @@
-import { BwpxEditor } from './components/BwpxEditor';
+import { ScyanPixelEditor } from './components/PixelEditor';
 
 export function App() {
-  return <BwpxEditor initialWidth={128} initialHeight={32} title="OLED PIXEL EDITOR" />;
+  return <ScyanPixelEditor title="SCYAN PIXEL EDITOR" />;
 }
 
 export default App;
