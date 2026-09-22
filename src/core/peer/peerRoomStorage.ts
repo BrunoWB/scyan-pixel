@@ -1,3 +1,6 @@
+import { generateRoomName } from './peerNames';
+import { generatePeerId } from './peerIdentity';
+
 export interface RoomSnapshotData {
   roomId?: string;
   roomName: string;
@@ -135,6 +138,12 @@ export function saveRoomSnapshot(snapshot: RoomSnapshotData): void {
     }
 
     // Keep most recent 50 rooms to prevent storage bloat
+    if (currentList.length > 50) {
+      const dropped = currentList.slice(50);
+      for (let i = 0; i < dropped.length; i++) {
+        window.localStorage.removeItem(getRoomStorageKey(dropped[i].roomName));
+      }
+    }
     const trimmed = currentList.slice(0, 50);
     window.localStorage.setItem(ROOMS_INDEX_STORAGE_KEY, JSON.stringify(trimmed));
   } catch (err) {
@@ -180,4 +189,48 @@ export function updateStoredRoomUuid(roomName: string, newUuid: string): void {
     snapshot.updatedAt = Date.now();
     saveRoomSnapshot(snapshot);
   }
+}
+
+/**
+ * Copies an existing room snapshot to a new save with a fresh room name and roomUuid.
+ * Prevents peer reconciliation issues and conflict loops by creating a clean independent fork.
+ */
+export function forkRoomSnapshot(sourceRoomName: string, authorName?: string): RoomSnapshotData | null {
+  const sourceSnapshot = loadRoomSnapshot(sourceRoomName);
+  if (!sourceSnapshot) return null;
+
+  const newRoomName = generateRoomName(authorName);
+  const newUuid =
+    typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
+  const now = Date.now();
+
+  const sourcePixels = Array.isArray(sourceSnapshot.pixels)
+    ? sourceSnapshot.pixels
+    : sourceSnapshot.canvasData && Array.isArray(sourceSnapshot.canvasData.pixels)
+      ? sourceSnapshot.canvasData.pixels
+      : [];
+
+  const copiedPixels: [number, number, string, number?][] = sourcePixels
+    .filter((p) => Boolean(p && p[2] && p[2] !== 'transparent' && p[2] !== 'none'))
+    .map((p) => [p[0], p[1], p[2], now]);
+
+  const newSnapshot: RoomSnapshotData = {
+    roomId: newUuid,
+    roomName: newRoomName,
+    roomUuid: newUuid,
+    createdAt: now,
+    updatedAt: now,
+    width: sourceSnapshot.width,
+    height: sourceSnapshot.height,
+    pixels: copiedPixels,
+    pixelCount: copiedPixels.length,
+    canvasData: {
+      width: sourceSnapshot.width,
+      height: sourceSnapshot.height,
+      pixels: copiedPixels,
+    },
+  };
+
+  saveRoomSnapshot(newSnapshot);
+  return newSnapshot;
 }

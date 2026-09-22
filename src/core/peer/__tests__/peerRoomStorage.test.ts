@@ -6,6 +6,7 @@ import {
   deleteRoomSnapshot,
   getStoredRoomUuid,
   updateStoredRoomUuid,
+  forkRoomSnapshot,
   type RoomSnapshotData,
   ROOMS_INDEX_STORAGE_KEY,
 } from '../peerRoomStorage';
@@ -189,5 +190,47 @@ describe('peerRoomStorage', () => {
   it('handles invalid corrupted localStorage JSON gracefully', () => {
     mockStore[ROOMS_INDEX_STORAGE_KEY] = 'invalid-json{{{';
     expect(listRoomSnapshots()).toEqual([]);
+  });
+
+  it('forks an existing room snapshot to a new save with a fresh name and UUID', () => {
+    saveRoomSnapshot({
+      roomName: 'original-source-room',
+      roomUuid: 'orig-uuid-111',
+      createdAt: 1000,
+      updatedAt: 1500,
+      width: 32,
+      height: 32,
+      pixels: [[5, 6, '#00e5a3', 1200]],
+      pixelCount: 1,
+    });
+
+    const forked = forkRoomSnapshot('original-source-room', 'montreal-wolf');
+    expect(forked).not.toBeNull();
+    expect(forked!.roomName).not.toBe('original-source-room');
+    expect(forked!.roomName.startsWith('montreal-wolf-')).toBe(true);
+    expect(forked!.roomUuid).not.toBe('orig-uuid-111');
+    expect(forked!.width).toBe(32);
+    expect(forked!.height).toBe(32);
+    expect(forked!.pixelCount).toBe(1);
+    expect(forked!.pixels[0][0]).toBe(5);
+    expect(forked!.pixels[0][1]).toBe(6);
+    expect(forked!.pixels[0][2]).toBe('#00e5a3');
+
+    // Check that it's persisted in storage
+    const loadedFork = loadRoomSnapshot(forked!.roomName);
+    expect(loadedFork).not.toBeNull();
+    expect(loadedFork?.roomName).toBe(forked!.roomName);
+    expect(loadedFork?.roomUuid).toBe(forked!.roomUuid);
+
+    // Both original and forked rooms are in the index
+    const list = listRoomSnapshots();
+    expect(list).toHaveLength(2);
+    expect(list.some((r) => r.roomName === 'original-source-room')).toBe(true);
+    expect(list.some((r) => r.roomName === forked!.roomName)).toBe(true);
+  });
+
+  it('returns null when attempting to fork a non-existent room', () => {
+    const forked = forkRoomSnapshot('does-not-exist', 'test-user');
+    expect(forked).toBeNull();
   });
 });

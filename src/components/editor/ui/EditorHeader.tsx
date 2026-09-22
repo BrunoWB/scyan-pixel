@@ -10,6 +10,8 @@ import {
   Share2,
   Minus,
   Plus,
+  FilePlus,
+  FolderOpen,
 } from 'lucide-react';
 import { BrandIdentityLogo, BrandWolfMascot } from '../../brand/BrandIdentityLogo';
 import { ColorPicker } from '../../ColorPicker';
@@ -60,6 +62,9 @@ export interface EditorHeaderProps {
   // Share & Peer Collaboration
   onOpenShareModal?: () => void;
   connectedPeers?: ConnectedPeer[];
+  // Room Storage / Canvas Actions
+  onNewCanvas?: () => void;
+  onOpenLoadModal?: () => void;
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -97,6 +102,8 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   canvasDimensions,
   onOpenShareModal,
   connectedPeers = [],
+  onNewCanvas,
+  onOpenLoadModal,
 }) => {
 
   return (
@@ -145,8 +152,34 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           style={{ marginRight: '1.5rem' }}
         />
 
-        {/* Action Controls: Undo/Redo, Brush Size, Transforms (scrollable on narrow screens) */}
+        {/* Action Controls: New/Load, Undo/Redo, Brush Size, Transforms (scrollable on narrow screens) */}
         <div className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto py-1">
+          {/* New Canvas & Load Saved Room */}
+          <div className="flex items-center gap-1 shrink-0 bg-[#090b10] border border-[#1e2332] rounded-md px-1.5 py-1">
+            <button
+              type="button"
+              onClick={onNewCanvas}
+              disabled={!onNewCanvas}
+              className="p-2 rounded-md hover:bg-[#1c2230] text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              title="New Canvas / New Room"
+              aria-label="New Canvas / New Room"
+            >
+              <FilePlus className="w-3.5 h-3.5 text-cyan-400" />
+            </button>
+            <button
+              type="button"
+              onClick={onOpenLoadModal}
+              disabled={!onOpenLoadModal}
+              className="p-2 rounded-md hover:bg-[#1c2230] text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              title="Load Saved Room"
+              aria-label="Load Saved Room"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+            </button>
+          </div>
+
+          <div className="h-4.5 w-[1px] bg-[#222836] shrink-0" />
+
           {/* Undo / Redo */}
           <div className="flex items-center gap-1 shrink-0 bg-[#090b10] border border-[#1e2332] rounded-md px-1.5 py-1">
             <button

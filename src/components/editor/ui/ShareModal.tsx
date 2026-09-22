@@ -12,6 +12,7 @@ import {
   History,
   Trash2,
   RotateCcw,
+  CopyPlus,
 } from 'lucide-react';
 import type { PeerProfile, ConnectedPeer } from '../../../core/peer/peerIdentity';
 import {
@@ -37,6 +38,7 @@ export interface ShareModalProps {
   connectedPeers: ConnectedPeer[];
   savedRooms?: RoomMetadata[];
   onRestoreRoom?: (roomName: string) => void;
+  onCopyToNewSave?: (roomName: string) => void;
   onDeleteRoom?: (roomName: string) => void;
 }
 
@@ -55,6 +57,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   connectedPeers,
   savedRooms = [],
   onRestoreRoom,
+  onCopyToNewSave,
   onDeleteRoom,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -458,6 +461,18 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                           >
                             <RotateCcw className="w-3 h-3" />
                             <span>Load</span>
+                          </button>
+                        )}
+                        {onCopyToNewSave && (
+                          <button
+                            type="button"
+                            onClick={() => onCopyToNewSave(room.roomName)}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-[#1f2535] hover:bg-[#2c354a] text-slate-200 hover:text-white transition text-[11px] cursor-pointer"
+                            title="Copy to new save with fresh ID"
+                            aria-label={`Copy ${room.roomName} to new save`}
+                          >
+                            <CopyPlus className="w-3 h-3 text-amber-400" />
+                            <span>Fork</span>
                           </button>
                         )}
                         {onDeleteRoom && (

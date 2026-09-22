@@ -357,6 +357,9 @@ export class PeerSessionManager {
           if (pending) {
             this.pendingSnapshots.delete(peerId);
             this.callbacks.onRemoteSnapshot?.(pending);
+          } else {
+            // Request peer snapshot to conciliate latest peer changes upon handshake verification
+            this.snapshotRequestAction?.send({ fromPeer: this.profile.id }, peerId);
           }
         } else {
           // UUID Mismatch: Two distinct rooms with same room name!

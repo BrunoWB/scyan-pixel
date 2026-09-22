@@ -121,4 +121,38 @@ describe('EditorHistory engine', () => {
     expect(summary.historyIndex).toBe(0);
     expect(summary.historyLength).toBe(1);
   });
+
+  it('reset on EditorHistory engine resets history stack and disables undo/redo', () => {
+    const grid = new BwpxGrid(16, 16);
+    const history = new EditorHistory(grid);
+
+    // Commit a mutation
+    const g1 = new BwpxGrid(16, 16);
+    g1.set(1, 1, 1);
+    history.commit(g1);
+    expect(history.canUndo).toBe(true);
+    expect(history.length).toBe(2);
+
+    // Now reset with a brand new blank grid
+    const blank = new BwpxGrid(16, 16);
+    history.reset(blank);
+    expect(history.canUndo).toBe(false);
+    expect(history.canRedo).toBe(false);
+    expect(history.historyIndex).toBe(0);
+    expect(history.length).toBe(1);
+    expect(history.current.get(1, 1)).toBe(0);
+  });
+
+  it('useEditorHistory hook exposes resetGrid function', () => {
+    function TestComponent() {
+      const history = useEditorHistory({ initialWidth: 16, initialHeight: 16 });
+      return React.createElement('div', {
+        id: 'reset-check',
+        'data-has-reset': String(typeof history.resetGrid === 'function'),
+      });
+    }
+
+    const html = renderToString(React.createElement(TestComponent));
+    expect(html).toContain('data-has-reset="true"');
+  });
 });

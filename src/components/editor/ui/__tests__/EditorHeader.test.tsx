@@ -108,4 +108,18 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
 
     expect(html).not.toContain('connected peer(s)');
   });
+
+  it('renders New Canvas and Load Saved Room buttons between logo and undo/redo', () => {
+    const html = renderToString(<EditorHeader {...defaultProps} />);
+
+    // Renders "New Canvas / New Room" and "Load Saved Room" action buttons
+    expect(html).toContain('title="New Canvas / New Room"');
+    expect(html).toContain('aria-label="New Canvas / New Room"');
+    expect(html).toContain('title="Load Saved Room"');
+    expect(html).toContain('aria-label="Load Saved Room"');
+
+    // Includes FilePlus and FolderOpen icons
+    expect(html).toContain('lucide-file-plus');
+    expect(html).toContain('lucide-folder-open');
+  });
 });

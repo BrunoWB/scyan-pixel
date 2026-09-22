@@ -119,8 +119,13 @@ describe('usePeerSession hook', () => {
       const summary = {
         hasSaveRoom: typeof session.saveRoom === 'function',
         hasRestoreRoom: typeof session.restoreRoom === 'function',
+        hasCopyRoomToNewSave: typeof session.copyRoomToNewSave === 'function',
         hasDeleteRoom: typeof session.deleteRoom === 'function',
         hasEnsureActiveRoom: typeof session.ensureActiveRoom === 'function',
+        hasOpenLoadModal: typeof session.openLoadModal === 'function',
+        hasCloseLoadModal: typeof session.closeLoadModal === 'function',
+        isLoadModalOpen: session.isLoadModalOpen,
+        hasRequestSnapshot: typeof session.requestSnapshot === 'function',
         hasResolveDiscard: typeof session.resolveConflictDiscardLocalAndJoin === 'function',
         hasResolveKeep: typeof session.resolveConflictKeepLocal === 'function',
         isSavedRoomsArray: Array.isArray(session.savedRooms),
@@ -136,8 +141,13 @@ describe('usePeerSession hook', () => {
     const summary = JSON.parse(match![1].replace(/&quot;/g, '"'));
     expect(summary.hasSaveRoom).toBe(true);
     expect(summary.hasRestoreRoom).toBe(true);
+    expect(summary.hasCopyRoomToNewSave).toBe(true);
     expect(summary.hasDeleteRoom).toBe(true);
     expect(summary.hasEnsureActiveRoom).toBe(true);
+    expect(summary.hasOpenLoadModal).toBe(true);
+    expect(summary.hasCloseLoadModal).toBe(true);
+    expect(summary.isLoadModalOpen).toBe(false);
+    expect(summary.hasRequestSnapshot).toBe(true);
     expect(summary.hasResolveDiscard).toBe(true);
     expect(summary.hasResolveKeep).toBe(true);
     expect(summary.isSavedRoomsArray).toBe(true);

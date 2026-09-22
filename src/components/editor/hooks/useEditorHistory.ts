@@ -150,6 +150,20 @@ export function useEditorHistory({
     [onGridChange]
   );
 
+  const resetGrid = useCallback(
+    (nextGrid: BwpxGrid) => {
+      const nextCloned = nextGrid.clone();
+      const nextState: HistoryState = {
+        history: [nextCloned],
+        index: 0,
+      };
+      stateRef.current = nextState;
+      setState(nextState);
+      onGridChange?.(nextCloned);
+    },
+    [onGridChange]
+  );
+
   const undo = useCallback((): BwpxGrid | null => {
     const cur = stateRef.current;
     if (cur.index <= 0) return null;
@@ -186,6 +200,7 @@ export function useEditorHistory({
     },
     setGrid,
     commitGrid,
+    resetGrid,
     undo,
     redo,
     get canUndo() {

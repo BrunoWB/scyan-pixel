@@ -40,6 +40,7 @@ import { EditorStatusBar } from './editor/ui/EditorStatusBar';
 import { ExportModal } from './editor/ui/ExportModal';
 import { ShareModal } from './editor/ui/ShareModal';
 import { RoomConflictModal } from './editor/ui/RoomConflictModal';
+import { RoomStorageModal } from './editor/ui/RoomStorageModal';
 import {
   diffGridPixels,
   applyPixelDeltas,
@@ -97,6 +98,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     grid,
     commitGrid,
     setGrid,
+    resetGrid,
     undo,
     redo,
     canUndo,
@@ -259,16 +261,24 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       );
       pixelTimestampsRef.current.clear(snapshot.updatedAt || Date.now());
       for (const p of snapshot.pixels) {
-        next.set(p[0], p[1], 1, p[2]);
+        if (p && p[2] && p[2] !== 'transparent' && p[2] !== 'none') {
+          next.set(p[0], p[1], 1, p[2]);
+        }
         if (typeof p[3] === 'number') {
           pixelTimestampsRef.current.set(p[0], p[1], p[3]);
         }
       }
       gridRef.current = next;
-      setGrid(next);
+      resetGrid(next);
+      setGhost(null);
+      setSelection(null);
+      setFloatingPixels(null);
+      if (strokeGridRef.current) {
+        strokeGridRef.current = null;
+      }
       fitToView(next);
     },
-    [activeDrawColor, setGrid, fitToView]
+    [activeDrawColor, resetGrid, fitToView, setGhost, setSelection, setFloatingPixels]
   );
 
   const handleRemoteMutation = useCallback(
@@ -460,6 +470,58 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     setGhost(null);
   }, [redo, peerSession]);
 
+  const handleNewCanvas = useCallback(() => {
+    // 1. Snapshot/save the current room state into local save files
+    peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current);
+
+    // 2. Reset the canvas to blank
+    const blankGrid = new PixelGrid(
+      gridRef.current.width,
+      gridRef.current.height,
+      undefined,
+      undefined,
+      activeDrawColor
+    );
+    gridRef.current = blankGrid;
+    resetGrid(blankGrid);
+    pixelTimestampsRef.current.clear(Date.now());
+    setGhost(null);
+    setSelection(null);
+    setFloatingPixels(null);
+    if (strokeGridRef.current) {
+      strokeGridRef.current = null;
+    }
+    fitToView(blankGrid);
+
+    // 3. Generate a new room with a new name (<user-name>-<action>) and new roomUuid
+    const newRoomName = peerSession.generateNewRoom();
+
+    // 4. Save initial snapshot for new room
+    peerSession.saveRoom(blankGrid, pixelTimestampsRef.current, newRoomName);
+  }, [activeDrawColor, peerSession, resetGrid, fitToView, setGhost, setSelection, setFloatingPixels]);
+
+  const handleLoadRoom = useCallback(
+    (roomName: string) => {
+      // Snapshot current work before switching
+      peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current);
+      peerSession.restoreRoom(roomName);
+      peerSession.closeLoadModal();
+      peerSession.closeShareModal();
+    },
+    [peerSession]
+  );
+
+  const handleCopyToNewSave = useCallback(
+    (roomName: string) => {
+      // Snapshot current work before switching
+      peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current);
+      peerSession.copyRoomToNewSave(roomName);
+      peerSession.closeLoadModal();
+      peerSession.closeShareModal();
+    },
+    [peerSession]
+  );
+
 
   // File import ref and trigger
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -583,7 +645,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (modalContent || isImportModalOpen || peerSession.isShareModalOpen) return;
+      if (modalContent || isImportModalOpen || peerSession.isShareModalOpen || peerSession.isLoadModalOpen) return;
 
       if (e.key === 'Escape') {
         if (ghostPlacementRef.current) {
@@ -793,6 +855,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     modalContent,
     isImportModalOpen,
     peerSession.isShareModalOpen,
+    peerSession.isLoadModalOpen,
     handleUndo,
     handleRedo,
     isSpaceHeld,
@@ -1420,6 +1483,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         historyLength={historyLength}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        onNewCanvas={handleNewCanvas}
+        onOpenLoadModal={peerSession.openLoadModal}
         brushSize={brushSize}
         setBrushSize={setBrushSize}
         onRotate90={handleRotate90}
@@ -1555,7 +1620,19 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onGenerateNewRoom={peerSession.generateNewRoom}
         connectedPeers={peerSession.connectedPeers}
         savedRooms={peerSession.savedRooms}
-        onRestoreRoom={peerSession.restoreRoom}
+        onRestoreRoom={handleLoadRoom}
+        onCopyToNewSave={handleCopyToNewSave}
+        onDeleteRoom={peerSession.deleteRoom}
+      />
+
+      {/* Saved Rooms / Storage Modal */}
+      <RoomStorageModal
+        isOpen={peerSession.isLoadModalOpen}
+        onClose={peerSession.closeLoadModal}
+        savedRooms={peerSession.savedRooms}
+        currentRoomId={peerSession.roomId}
+        onLoadRoom={handleLoadRoom}
+        onCopyToNewSave={handleCopyToNewSave}
         onDeleteRoom={peerSession.deleteRoom}
       />
 
