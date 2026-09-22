@@ -26,6 +26,7 @@ import {
   Film,
   Upload,
   Crop,
+  Palette,
 } from 'lucide-react';
 import './ImageImportModal.css';
 
@@ -91,12 +92,15 @@ export const ImageImportModal: React.FC<ImageImportModalProps> = ({
     setUserColorMode(mode);
   }, [setUserColorMode]);
 
+  const [maxColors, setMaxColors] = useState<number>(0); // 0 = Full (unlimited)
+
   useEffect(() => {
     if (!isOpen) {
       const timer = setTimeout(() => {
         setInternalSource(null);
         setIsDragOver(false);
         setUserColorMode(null);
+        setMaxColors(0);
       }, 0);
       return () => clearTimeout(timer);
     }
@@ -442,26 +446,38 @@ export const ImageImportModal: React.FC<ImageImportModalProps> = ({
       targetHeight: targetDimensions.h,
       color: pixelColor,
       colorMode,
+      maxColors: maxColors > 0 ? maxColors : undefined,
       crop: cropRect ? { x: cropRect.x, y: cropRect.y, width: cropRect.w, height: cropRect.h } : undefined,
     });
-  }, [isOpen, decodedGif, threshold, invert, targetDimensions.w, targetDimensions.h, pixelColor, colorMode, cropRect]);
+  }, [isOpen, decodedGif, threshold, invert, targetDimensions.w, targetDimensions.h, pixelColor, colorMode, maxColors, cropRect]);
 
-  // Derive converted static image grid
-  const convertedGrid = useMemo(() => {
+  // Derive converted static image grid and palette
+  const convertedStaticResult = useMemo(() => {
     if (!isOpen || decodedGif || !imgElement || targetDimensions.w <= 0 || targetDimensions.h <= 0) {
       return null;
     }
-    const { grid } = convertImageElementToGrid(imgElement, {
+    return convertImageElementToGrid(imgElement, {
       threshold,
       invert,
       targetWidth: targetDimensions.w,
       targetHeight: targetDimensions.h,
       color: pixelColor,
       colorMode,
+      maxColors: maxColors > 0 ? maxColors : undefined,
       crop: cropRect ? { x: cropRect.x, y: cropRect.y, width: cropRect.w, height: cropRect.h } : undefined,
     });
-    return grid;
-  }, [isOpen, decodedGif, imgElement, threshold, invert, targetDimensions.w, targetDimensions.h, pixelColor, colorMode, cropRect]);
+  }, [isOpen, decodedGif, imgElement, threshold, invert, targetDimensions.w, targetDimensions.h, pixelColor, colorMode, maxColors, cropRect]);
+
+  const convertedGrid = convertedStaticResult?.grid || null;
+
+  // Active palette swatches for live preview
+  const activePalette = useMemo(() => {
+    if (!colorMode) return [];
+    if (decodedGif && gifFrames.length > 0) {
+      return gifFrames[0]?.hexPalette || [];
+    }
+    return convertedStaticResult?.hexPalette || [];
+  }, [colorMode, decodedGif, gifFrames, convertedStaticResult]);
 
   // Active grid to preview and confirm
   const currentGrid = useMemo(() => {
@@ -866,7 +882,75 @@ export const ImageImportModal: React.FC<ImageImportModalProps> = ({
               </div>
             )}
 
-            {/* Threshold Slider (hidden in color mode) */}
+            {/* Color Mode: Max Colors / Adaptive Palette Slider */}
+            {colorMode && (
+              <>
+                <div className="image-import-control-row">
+                  <div className="image-import-control-label">
+                    <Palette size={13} />
+                    <span>Max Colors</span>
+                  </div>
+                  <div className="image-import-slider-container">
+                    <input
+                      type="range"
+                      min="2"
+                      max="65"
+                      value={maxColors === 0 ? 65 : maxColors}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setMaxColors(val >= 65 ? 0 : val);
+                      }}
+                      className="image-import-slider"
+                      title="Adjust color complexity (2 to 64 colors, or Full)"
+                    />
+                    <span className="image-import-slider-val">
+                      {maxColors === 0 ? 'Full' : maxColors}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Quick Presets & Swatch Preview */}
+                <div className="image-import-color-presets-row">
+                  <div className="image-import-preset-pills">
+                    {[4, 8, 16, 32].map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        className={`image-import-preset-pill ${maxColors === k ? 'active' : ''}`}
+                        onClick={() => setMaxColors(k)}
+                      >
+                        {k}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className={`image-import-preset-pill ${maxColors === 0 ? 'active' : ''}`}
+                      onClick={() => setMaxColors(0)}
+                    >
+                      Full
+                    </button>
+                  </div>
+
+                  {activePalette.length > 0 && (
+                    <div
+                      className="image-import-palette-preview"
+                      title={`Extracted adaptive palette (${activePalette.length} colors)`}
+                    >
+                      {activePalette.map((hex, i) => (
+                        <div
+                          key={`${hex}-${i}`}
+                          className="image-import-palette-swatch"
+                          style={{ backgroundColor: hex }}
+                          title={hex}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {/* Threshold Slider (1bpp Monochrome mode) */}
             {!colorMode && (
               <div className="image-import-control-row">
                 <div className="image-import-control-label">

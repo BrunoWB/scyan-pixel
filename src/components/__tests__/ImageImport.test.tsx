@@ -48,8 +48,9 @@ describe('ImageImportModal', () => {
     expect(html).toContain('image-import-mode-toggle');
     expect(html).toContain('Color');
     expect(html).toContain('1bpp Monochrome');
-    // In default Color mode, threshold slider is hidden
-    expect(html).not.toContain('image-import-slider');
+    // In default Color mode, threshold slider is hidden and Max Colors slider is shown
+    expect(html).not.toContain('Threshold');
+    expect(html).toContain('Max Colors');
   });
 
   it('does not render mode toggle when allowColor is false and shows threshold slider', () => {

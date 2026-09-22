@@ -1,6 +1,7 @@
 import { GifReader } from 'omggif';
 import { BwpxGrid } from './PixelGrid';
 import { convertImageDataToGrid, type ImageConversionOptions } from './imageConversion';
+import { quantizePixelsToPalette } from './colorQuantization';
 
 export interface DecodedGifFrame {
   index: number;
@@ -21,6 +22,7 @@ export interface ConvertedGifFrame {
   index: number;
   delayMs: number;
   grid: BwpxGrid;
+  hexPalette?: string[];
 }
 
 /**
@@ -194,10 +196,9 @@ export function convertGifFramesToGrids(
   const targetW = Math.max(1, Math.round(options.targetWidth || baseW));
   const targetH = Math.max(1, Math.round(options.targetHeight || baseH));
 
-  return decodedGif.frames.map((frame) => {
-    let scaledRgba: Uint8ClampedArray;
+  const scaledBuffers = decodedGif.frames.map((frame) => {
     if (crop) {
-      scaledRgba = cropAndScaleRgbaNearestNeighbor(
+      return cropAndScaleRgbaNearestNeighbor(
         frame.rgba,
         frame.width,
         frame.height,
@@ -209,11 +210,22 @@ export function convertGifFramesToGrids(
         targetH
       );
     } else if (targetW === frame.width && targetH === frame.height) {
-      scaledRgba = frame.rgba;
+      return frame.rgba;
     } else {
-      scaledRgba = scaleRgbaNearestNeighbor(frame.rgba, frame.width, frame.height, targetW, targetH);
+      return scaleRgbaNearestNeighbor(frame.rgba, frame.width, frame.height, targetW, targetH);
     }
+  });
 
+  let activeColorMap = options.colorMap;
+  let hexPalette: string[] | undefined;
+  if (options.colorMode && !activeColorMap && options.maxColors && options.maxColors > 0) {
+    const quant = quantizePixelsToPalette(scaledBuffers, options.maxColors, 32);
+    activeColorMap = quant.colorMap;
+    hexPalette = quant.hexPalette;
+  }
+
+  return decodedGif.frames.map((frame, idx) => {
+    const scaledRgba = scaledBuffers[idx];
     const imgData =
       typeof ImageData !== 'undefined'
         ? new ImageData(scaledRgba as any, targetW, targetH)
@@ -231,12 +243,115 @@ export function convertGifFramesToGrids(
       targetHeight: targetH,
       color: options.color,
       colorMode: options.colorMode,
+      maxColors: options.maxColors,
+      colorMap: activeColorMap,
     });
 
     return {
       index: frame.index,
       delayMs: frame.delayMs,
       grid,
+      hexPalette,
     };
   });
+}
+
+export interface CompactTableLayout {
+  cols: number;
+  rows: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Calculates a compact 2D table layout (columns x rows) for animation frames.
+ * Compacts the frames as a table rather than a single row, optimizing to fit within
+ * the canvas dimensions while keeping the aspect ratio balanced and minimizing empty slots.
+ */
+export function calculateCompactTableLayout(
+  frameCount: number,
+  frameWidth: number,
+  frameHeight: number,
+  canvasWidth?: number,
+  canvasHeight?: number
+): CompactTableLayout {
+  if (frameCount <= 1) {
+    return {
+      cols: 1,
+      rows: 1,
+      width: Math.max(1, frameWidth),
+      height: Math.max(1, frameHeight),
+    };
+  }
+
+  let bestCols = 1;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  // Prefer aspect ratio matching canvas, or square (1.0) if not specified
+  const targetRatio =
+    canvasWidth && canvasHeight && canvasHeight > 0
+      ? Math.min(2.0, Math.max(0.5, canvasWidth / canvasHeight))
+      : 1.0;
+
+  for (let cols = 1; cols <= frameCount; cols++) {
+    const rows = Math.ceil(frameCount / cols);
+    const sheetW = cols * frameWidth;
+    const sheetH = rows * frameHeight;
+    const wastedCells = cols * rows - frameCount;
+
+    // 1. Canvas overflow penalty
+    let overflowPenalty = 0;
+    if (canvasWidth && canvasHeight) {
+      const overflowW = Math.max(0, sheetW - canvasWidth);
+      const overflowH = Math.max(0, sheetH - canvasHeight);
+      const totalOverflow = overflowW * 1.5 + overflowH;
+      if (totalOverflow > 0) {
+        overflowPenalty = 100000 + totalOverflow * 1000;
+      }
+    }
+
+    // 2. Single row penalty: strongly discourage a single row when multiple frames exist
+    let singleRowPenalty = 0;
+    if (frameCount >= 3 && rows === 1) {
+      singleRowPenalty = 20000;
+    } else if (
+      frameCount === 2 &&
+      rows === 1 &&
+      canvasWidth &&
+      sheetW > canvasWidth &&
+      canvasHeight &&
+      sheetH * 2 <= canvasHeight
+    ) {
+      singleRowPenalty = 10000;
+    }
+
+    // 3. Wasted cells penalty (empty slots in the grid)
+    const wastedPenalty = wastedCells * 25;
+
+    // 4. Aspect ratio penalty (prefer compact, balanced aspect ratio)
+    const sheetRatio = sheetW / Math.max(1, sheetH);
+    const ratioDiff = Math.abs(Math.log(sheetRatio / targetRatio));
+    const ratioPenalty = ratioDiff * 40;
+
+    // 5. Avoid single column for N >= 3 if not forced by width
+    let singleColPenalty = 0;
+    if (frameCount >= 3 && cols === 1) {
+      singleColPenalty = 15000;
+    }
+
+    const score = overflowPenalty + singleRowPenalty + wastedPenalty + ratioPenalty + singleColPenalty;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestCols = cols;
+    }
+  }
+
+  const finalRows = Math.ceil(frameCount / bestCols);
+  return {
+    cols: bestCols,
+    rows: finalRows,
+    width: bestCols * frameWidth,
+    height: finalRows * frameHeight,
+  };
 }

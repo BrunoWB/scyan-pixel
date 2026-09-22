@@ -285,4 +285,35 @@ describe('imageConversion colorMode', () => {
     // Transparent pixel is off
     expect(grid.get(1, 0)).toBe(0);
   });
+
+  it('quantizes colors to maxColors when specified in colorMode: true', () => {
+    const width = 4;
+    const height = 1;
+    // 4 distinct colors: Red, Green, Blue, Yellow
+    const data = new Uint8ClampedArray([
+      255, 0, 0, 255,
+      0, 255, 0, 255,
+      0, 0, 255, 255,
+      255, 255, 0, 255,
+    ]);
+
+    const fakeImageData = { width, height, data } as ImageData;
+    const grid = convertImageDataToGrid(fakeImageData, {
+      threshold: 128,
+      colorMode: true,
+      maxColors: 2,
+    });
+
+    const uniqueColors = new Set<string>();
+    for (let x = 0; x < width; x++) {
+      expect(grid.get(x, 0)).toBe(1);
+      const c = grid.getColor(x, 0);
+      if (c) uniqueColors.add(c);
+    }
+
+    // Must be quantized to at most 2 colors
+    expect(uniqueColors.size).toBeLessThanOrEqual(2);
+    expect(uniqueColors.size).toBeGreaterThan(0);
+  });
 });
+

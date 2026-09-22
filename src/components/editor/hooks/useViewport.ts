@@ -74,8 +74,8 @@ export function useViewport({
       const bounds = grid.getBounds();
       if (bounds.width > 0 && bounds.height > 0) {
         const fitZoom = Math.max(
-          2,
-          Math.min(32, Math.floor(Math.min((w - 80) / bounds.width, (h - 80) / bounds.height)))
+          1,
+          Math.min(32, Math.floor(Math.min((w - 80) / bounds.width, (h - 80) / bounds.height)) || 1)
         );
         setZoom(fitZoom);
         const centerX = bounds.minX + bounds.width / 2;
@@ -93,6 +93,28 @@ export function useViewport({
       }
     },
     [containerRef]
+  );
+
+  // Set zoom centered on the container viewport
+  const zoomTo = useCallback(
+    (newZoom: number) => {
+      const targetZoom = Math.max(1, Math.min(48, Math.round(newZoom)));
+      if (targetZoom === zoom) return;
+
+      const container = containerRef.current;
+      const w = container?.clientWidth ?? 0;
+      const h = container?.clientHeight ?? 0;
+      const centerX = w > 0 ? w / 2 : 0;
+      const centerY = h > 0 ? h / 2 : 0;
+      const scaleFactor = targetZoom / zoom;
+
+      setPan((prevPan) => ({
+        x: Math.round(centerX - (centerX - prevPan.x) * scaleFactor),
+        y: Math.round(centerY - (centerY - prevPan.y) * scaleFactor),
+      }));
+      setZoom(targetZoom);
+    },
+    [containerRef, zoom]
   );
 
   // Screen to Grid coordinate mapping
@@ -164,6 +186,7 @@ export function useViewport({
     panStart,
     setPanStart,
     fitToView,
+    zoomTo,
     getGridCoords,
     handleWheel,
   };

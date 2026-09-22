@@ -274,6 +274,73 @@
   text-align: right;
 }
 
+.image-import-color-presets-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 124px;
+}
+
+@media (max-width: 640px) {
+  .image-import-color-presets-row {
+    padding-left: 0;
+  }
+}
+
+.image-import-preset-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.image-import-preset-pill {
+  background: #151922;
+  border: 1px solid #232a37;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.image-import-preset-pill:hover {
+  background: #1e2533;
+  color: #f1f5f9;
+  border-color: #333f54;
+}
+
+.image-import-preset-pill.active {
+  background: rgba(0, 229, 163, 0.12);
+  border-color: var(--accent, #00e5a3);
+  color: var(--accent, #00e5a3);
+}
+
+.image-import-palette-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 260px;
+  overflow-x: auto;
+  padding: 2px 4px;
+  background: #0b0d12;
+  border: 1px solid #1c222c;
+  border-radius: 4px;
+}
+
+.image-import-palette-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
 .image-import-options-row {
   display: flex;
   align-items: center;

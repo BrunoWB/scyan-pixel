@@ -17,6 +17,7 @@ import { ImageImportModal } from './ImageImportModal';
 import { CanvasContextMenu } from './CanvasContextMenu';
 import type { RecentPaletteHandle } from './RecentPalette';
 import { getContrastColor } from '../core/colorUtils';
+import { calculateCompactTableLayout } from '../core/gifDecoder';
 
 import {
   type ToolType,
@@ -99,6 +100,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
   const {
     zoom,
+    zoomTo,
     pan,
     setPan,
     isSpaceHeld,
@@ -107,9 +109,14 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     setIsPanning,
     panStart,
     setPanStart,
+    fitToView,
     getGridCoords,
     handleWheel,
   } = useViewport({ containerRef });
+
+  const handleFitToScreen = useCallback(() => {
+    fitToView(grid);
+  }, [fitToView, grid]);
 
   // 4. Selection & Floating Pixels Hook
   const {
@@ -147,6 +154,12 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     y: number;
     rects?: { x: number; y: number; w: number; h: number }[];
     gifData?: { frames: { grid: BwpxGrid; delayMs: number }[]; name?: string };
+    gripX?: number;
+    gripY?: number;
+    cols?: number;
+    rows?: number;
+    frameWidth?: number;
+    frameHeight?: number;
   } | null>(null);
   const ghostPlacementRef = useRef(ghostPlacement);
   useEffect(() => {
@@ -575,9 +588,13 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         const targetY = gp.y;
         const next = grid.clone();
         if (gp.gifData && gp.gifData.frames.length > 0) {
-          const frameW = Math.round(gp.width / gp.gifData.frames.length);
+          const cols = gp.cols || 1;
+          const frameW = gp.frameWidth || Math.round(gp.width / cols);
+          const frameH = gp.frameHeight || gp.height;
           gp.gifData.frames.forEach((frame, i) => {
-            next.blit(frame.grid, targetX + i * frameW, targetY, true);
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            next.blit(frame.grid, targetX + col * frameW, targetY + row * frameH, true);
           });
           commitGrid(next);
           setSelection({
@@ -727,8 +744,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         prev
           ? {
               ...prev,
-              x: coords.x - Math.floor(prev.width / 2),
-              y: coords.y - Math.floor(prev.height / 2),
+              x: coords.x - (prev.gripX ?? Math.floor(prev.width / 2)),
+              y: coords.y - (prev.gripY ?? Math.floor(prev.height / 2)),
             }
           : null
       );
@@ -883,31 +900,55 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     const vpW = container?.clientWidth || 400;
     const vpH = container?.clientHeight || 400;
 
-    const isMultiFrame = gifData && gifData.frames.length > 0;
+    const isMultiFrame = !!(gifData && gifData.frames.length > 0);
     const frameCount = isMultiFrame ? gifData.frames.length : 1;
-    const totalW = w * frameCount;
+
+    const layout = isMultiFrame
+      ? calculateCompactTableLayout(frameCount, w, h, grid.width, grid.height)
+      : { cols: 1, rows: 1, width: w, height: h };
+
+    const totalW = layout.width;
+    const totalH = layout.height;
+
+    // For GIF imports, the ghost grip is anchored at (0, 0)
+    // For single image imports, center on the cursor
+    const gripX = isMultiFrame ? 0 : Math.floor(totalW / 2);
+    const gripY = isMultiFrame ? 0 : Math.floor(totalH / 2);
 
     const initialX = hoverPos
-      ? hoverPos.x - Math.floor(totalW / 2)
-      : Math.round((-pan.x + vpW / 2) / zoom - totalW / 2);
+      ? hoverPos.x - gripX
+      : isMultiFrame
+      ? 0
+      : Math.round((-pan.x + vpW / 2) / zoom - gripX);
     const initialY = hoverPos
-      ? hoverPos.y - Math.floor(h / 2)
-      : Math.round((-pan.y + vpH / 2) / zoom - h / 2);
+      ? hoverPos.y - gripY
+      : isMultiFrame
+      ? 0
+      : Math.round((-pan.y + vpH / 2) / zoom - gripY);
 
     let ghostPixels: ([number, number] | [number, number, string])[] = [];
     let rects: { x: number; y: number; w: number; h: number }[] | undefined = undefined;
 
     if (isMultiFrame) {
-      rects = gifData.frames.map((_, i) => ({
-        x: i * w,
-        y: 0,
-        w,
-        h,
-      }));
+      rects = gifData.frames.map((_, i) => {
+        const col = i % layout.cols;
+        const row = Math.floor(i / layout.cols);
+        return {
+          x: col * w,
+          y: row * h,
+          w,
+          h,
+        };
+      });
+
       gifData.frames.forEach((frame, i) => {
+        const col = i % layout.cols;
+        const row = Math.floor(i / layout.cols);
+        const offsetX = col * w;
+        const offsetY = row * h;
         const framePix = frame.grid.getAllColoredPixels();
         framePix.forEach(([rx, ry, col]) => {
-          ghostPixels.push([rx + i * w, ry, col]);
+          ghostPixels.push([rx + offsetX, ry + offsetY, col]);
         });
       });
     } else {
@@ -917,12 +958,18 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     setGhostPlacement({
       grid: importedGrid,
       width: totalW,
-      height: h,
+      height: totalH,
       pixels: ghostPixels,
       rects,
       x: initialX,
       y: initialY,
       gifData,
+      gripX,
+      gripY,
+      cols: layout.cols,
+      rows: layout.rows,
+      frameWidth: w,
+      frameHeight: h,
     });
   };
 
@@ -1157,22 +1204,20 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
       {/* 3. BOTTOM STATUS BAR */}
       <EditorStatusBar
-        activeTool={activeTool}
-        activeDrawColor={activeDrawColor}
-        isStrictMonochrome={isStrictMonochrome}
         hoverPos={hoverPos}
         grid={grid}
-        brushSize={brushSize}
         selection={selection}
         zoom={zoom}
+        onZoomChange={zoomTo}
+        onFitToScreen={handleFitToScreen}
       />
 
       {/* Image & GIF Import Modal */}
       <ImageImportModal
         isOpen={isImportModalOpen}
         imageSource={importSource}
-        canvasWidth={64}
-        canvasHeight={64}
+        canvasWidth={grid.width}
+        canvasHeight={grid.height}
         pixelColor={activePixelColor}
         bgColor={activeBgColor}
         onClose={() => {

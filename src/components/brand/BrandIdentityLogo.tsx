@@ -24,8 +24,24 @@ export const BrandWolfMascot: React.FC<BrandWolfMascotProps> = ({
   const glowFilterId = `brandEyeGlow_${uniqueId}`;
 
   return (
-    <div className={`relative flex items-center justify-center shrink-0 ${className}`}>
-      {/* Background glow layer: container smoothly transitions opacity & scale in both directions */}
+    <div className={`relative flex items-center justify-center shrink-0 overflow-visible ${className}`}>
+      {/* Outer Atmospheric Glow: unconstrained by container paddings, radiates outward across header and workspace */}
+      <div
+        className={`absolute -inset-8 sm:-inset-10 rounded-full blur-2xl pointer-events-none transition-all duration-700 ease-out ${
+          isHovered ? 'opacity-85 scale-100' : 'opacity-0 scale-60'
+        }`}
+        aria-hidden="true"
+      >
+        <div
+          className="w-full h-full rounded-full"
+          style={{
+            background:
+              'radial-gradient(circle at center, rgba(245, 148, 66, 0.45) 0%, rgba(245, 148, 66, 0.18) 45%, rgba(169, 83, 246, 0.08) 65%, transparent 80%)',
+          }}
+        />
+      </div>
+
+      {/* Core Warning Glow Layer */}
       <div
         className={`absolute -inset-3.5 rounded-full blur-md pointer-events-none transition-all duration-500 ease-out ${
           isHovered ? 'opacity-100 scale-100' : 'opacity-0 scale-75'
@@ -117,7 +133,7 @@ export const BrandIdentityLogo: React.FC<BrandIdentityLogoProps> = ({
       onContextMenu={onContextMenu}
       onMouseEnter={() => setInternalHover(true)}
       onMouseLeave={() => setInternalHover(false)}
-      className={`inline-flex items-center gap-2.5 group cursor-pointer select-none ${className}`}
+      className={`inline-flex items-center gap-2.5 group cursor-pointer select-none overflow-visible ${className}`}
     >
       {/* Wolf Mascot */}
       <BrandWolfMascot size={size} isHovered={activeHover} />

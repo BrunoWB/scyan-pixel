@@ -103,9 +103,14 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
     }
     if (buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
+      const centerY = rect.top + rect.height / 2;
+      const clampedY =
+        typeof window !== 'undefined'
+          ? Math.max(48, Math.min(window.innerHeight - 48, centerY))
+          : centerY;
       setFlyoutPos({
-        top: rect.top + rect.height / 2,
-        left: rect.right + 6,
+        top: clampedY,
+        left: rect.right + 8,
       });
       setIsHovered(true);
     }
@@ -114,7 +119,7 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
   const handleMouseLeave = () => {
     hideTimerRef.current = setTimeout(() => {
       setIsHovered(false);
-    }, 160);
+    }, 200);
   };
 
   const handleFlyoutMouseEnter = () => {
@@ -127,7 +132,7 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
   const handleFlyoutMouseLeave = () => {
     hideTimerRef.current = setTimeout(() => {
       setIsHovered(false);
-    }, 160);
+    }, 200);
   };
 
   const handleMainClick = () => {
@@ -175,7 +180,7 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
       {isHovered && flyoutPos && typeof document !== 'undefined' &&
         createPortal(
           <div
-            className="fixed z-50 flex items-center bg-[#181b24] border border-[#2d3446] rounded-md shadow-xl p-1 gap-1.5 backdrop-blur-sm"
+            className="fixed z-50 flex items-center bg-[#161922] border border-[#2d3548] rounded-xl shadow-2xl p-3 gap-2.5 backdrop-blur-md"
             style={{
               top: flyoutPos.top,
               left: flyoutPos.left,
@@ -184,8 +189,8 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
             onMouseEnter={handleFlyoutMouseEnter}
             onMouseLeave={handleFlyoutMouseLeave}
           >
-            {/* Invisible hover bridge to prevent premature mouseleave */}
-            <div className="absolute -left-2 top-0 bottom-0 w-2" />
+            {/* Invisible hover bridge to prevent premature mouseleave across the gap */}
+            <div className="absolute -left-3 -top-2 -bottom-2 w-3 pointer-events-auto" />
 
             {altVariants.map((alt) => (
               <button
@@ -198,11 +203,16 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
                   if (newIdx !== -1) setLastVariantIndex(newIdx);
                   setIsHovered(false);
                 }}
-                className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#202532] hover:bg-[#2b3242] text-slate-200 hover:text-white transition cursor-pointer text-xs font-mono"
+                className="group flex flex-col items-center justify-center min-w-[72px] px-3 py-2.5 rounded-lg bg-[#1e2330] hover:bg-[#282f42] active:bg-[#323b52] border border-[#2b3345] hover:border-[#3e4a64] text-slate-200 hover:text-white transition-all cursor-pointer shadow-sm hover:shadow"
                 title={alt.title}
+                aria-label={alt.label || alt.title}
               >
-                <span className="text-slate-300">{alt.icon}</span>
-                <span className="font-medium text-[11px] whitespace-nowrap">{alt.label}</span>
+                <div className="w-8 h-8 rounded-md flex items-center justify-center bg-[#14161f] group-hover:bg-[#1b212f] text-slate-300 group-hover:text-white transition-colors mb-1.5 [&>svg]:w-5 [&>svg]:h-5">
+                  {alt.icon}
+                </div>
+                <span className="font-mono text-[11px] font-medium text-slate-300 group-hover:text-white whitespace-nowrap">
+                  {alt.label}
+                </span>
               </button>
             ))}
           </div>,

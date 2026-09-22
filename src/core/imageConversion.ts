@@ -1,5 +1,6 @@
 import { BwpxGrid } from './PixelGrid';
 import { rgbToHex } from './colorUtils';
+import { quantizePixelsToPalette } from './colorQuantization';
 
 export interface ContentBoundingBox {
   x: number;
@@ -15,6 +16,8 @@ export interface ImageConversionOptions {
   targetHeight?: number;
   color?: string;
   colorMode?: boolean;
+  maxColors?: number; // Adaptive palette max colors (e.g. 2 to 64, or 0/undefined for unlimited)
+  colorMap?: Map<number, string>; // Precomputed color mapping (e.g. for multi-frame unified GIF palette)
   crop?: {
     x: number;
     y: number;
@@ -31,11 +34,17 @@ export function convertImageDataToGrid(
   imageData: ImageData,
   options: ImageConversionOptions
 ): BwpxGrid {
-  const { threshold, invert = false, color, colorMode = false } = options;
+  const { threshold, invert = false, color, colorMode = false, maxColors, colorMap } = options;
   const width = imageData.width;
   const height = imageData.height;
   const data = imageData.data;
   const grid = new BwpxGrid(width, height, undefined, undefined, color || '#00e5a3');
+
+  let activeColorMap = colorMap;
+  if (colorMode && !activeColorMap && maxColors && maxColors > 0) {
+    const quant = quantizePixelsToPalette(data, maxColors, 32);
+    activeColorMap = quant.colorMap;
+  }
 
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -47,7 +56,13 @@ export function convertImageDataToGrid(
 
       if (colorMode) {
         if (a >= 32) {
-          const hex = rgbToHex(r, g, b);
+          let hex: string;
+          if (activeColorMap) {
+            const key = (r << 16) | (g << 8) | b;
+            hex = activeColorMap.get(key) || rgbToHex(r, g, b);
+          } else {
+            hex = rgbToHex(r, g, b);
+          }
           grid.set(x, y, 1, hex);
         }
         continue;
@@ -272,7 +287,14 @@ export function detectContentBoundingBox(
 export function convertImageElementToGrid(
   img: HTMLImageElement,
   options: ImageConversionOptions
-): { grid: BwpxGrid; width: number; height: number; originalWidth: number; originalHeight: number } {
+): {
+  grid: BwpxGrid;
+  width: number;
+  height: number;
+  originalWidth: number;
+  originalHeight: number;
+  hexPalette?: string[];
+} {
   const naturalW = img.naturalWidth || img.width;
   const naturalH = img.naturalHeight || img.height;
 
@@ -307,7 +329,19 @@ export function convertImageElementToGrid(
   ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, width, height);
 
   const imgData = ctx.getImageData(0, 0, width, height);
-  const grid = convertImageDataToGrid(imgData, options);
+
+  let hexPalette: string[] | undefined;
+  let activeOptions = options;
+  if (options.colorMode && options.maxColors && options.maxColors > 0) {
+    const quant = quantizePixelsToPalette(imgData.data, options.maxColors, 32);
+    hexPalette = quant.hexPalette;
+    activeOptions = {
+      ...options,
+      colorMap: quant.colorMap,
+    };
+  }
+
+  const grid = convertImageDataToGrid(imgData, activeOptions);
 
   return {
     grid,
@@ -315,5 +349,6 @@ export function convertImageElementToGrid(
     height,
     originalWidth: cropW,
     originalHeight: cropH,
+    hexPalette,
   };
 }

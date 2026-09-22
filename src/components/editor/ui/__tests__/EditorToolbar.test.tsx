@@ -201,5 +201,23 @@ describe('ShapeToolButton', () => {
     expect(htmlArrowActive).toContain('data-testid="arrow-icon"');
     expect(htmlArrowActive).toContain('background-color:#ff004d');
   });
+
+  it('renders correctly with custom multi-variant list', () => {
+    const html = renderToString(
+      <ShapeToolButton
+        variants={[
+          { tool: 'line', icon: <span data-testid="line-tool" />, title: 'Line Tool', label: 'Line' },
+          { tool: 'arrow', icon: <span data-testid="arrow-tool" />, title: 'Arrow Tool', label: 'Arrow' },
+        ]}
+        activeTool="line"
+        setActiveTool={() => {}}
+        activeDrawColor="#00e5a3"
+      />
+    );
+
+    expect(html).toContain('title="Line Tool"');
+    expect(html).toContain('data-testid="line-tool"');
+    expect(html).toContain('background-color:#00e5a3');
+  });
 });
 

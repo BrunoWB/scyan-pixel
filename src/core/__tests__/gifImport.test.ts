@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { BwpxGrid } from '../PixelGrid';
-import { decodeGif, convertGifFramesToGrids, isGifBuffer } from '../gifDecoder';
+import { decodeGif, convertGifFramesToGrids, isGifBuffer, calculateCompactTableLayout } from '../gifDecoder';
 import { renderBwpxCanvas } from '../gridRenderer';
 
 const DESKTOP_DIR = '/home/Scyan/Desktop';
@@ -139,6 +139,105 @@ describe('GIF Decoding and Spritesheet Conversion', () => {
       expect(slice.countOn()).toBe(frame.grid.countOn());
     });
   });
+
+  describe('calculateCompactTableLayout', () => {
+    it('returns 1x1 for single frame or empty', () => {
+      expect(calculateCompactTableLayout(1, 16, 16)).toEqual({
+        cols: 1,
+        rows: 1,
+        width: 16,
+        height: 16,
+      });
+      expect(calculateCompactTableLayout(0, 16, 16)).toEqual({
+        cols: 1,
+        rows: 1,
+        width: 16,
+        height: 16,
+      });
+    });
+
+    it('compacts 4 frames (16x16) into 2 cols x 2 rows instead of a single row', () => {
+      const layout = calculateCompactTableLayout(4, 16, 16, 64, 64);
+      expect(layout.cols).toBe(2);
+      expect(layout.rows).toBe(2);
+      expect(layout.width).toBe(32);
+      expect(layout.height).toBe(32);
+    });
+
+    it('compacts 8 frames (32x32) into 4 cols x 2 rows to fit 128x64 display perfectly', () => {
+      const layout = calculateCompactTableLayout(8, 32, 32, 128, 64);
+      expect(layout.cols).toBe(4);
+      expect(layout.rows).toBe(2);
+      expect(layout.width).toBe(128);
+      expect(layout.height).toBe(64);
+    });
+
+    it('compacts 16 frames (16x16) into 4 cols x 4 rows to fit 64x64 canvas', () => {
+      const layout = calculateCompactTableLayout(16, 16, 16, 64, 64);
+      expect(layout.cols).toBe(4);
+      expect(layout.rows).toBe(4);
+      expect(layout.width).toBe(64);
+      expect(layout.height).toBe(64);
+    });
+
+    it('compacts 6 frames (16x16) into 3 cols x 2 rows on a 128x64 canvas', () => {
+      const layout = calculateCompactTableLayout(6, 16, 16, 128, 64);
+      expect(layout.cols).toBe(3);
+      expect(layout.rows).toBe(2);
+      expect(layout.width).toBe(48);
+      expect(layout.height).toBe(32);
+    });
+
+    it('falls back to single row only when canvas height strictly allows only 1 row', () => {
+      const layout = calculateCompactTableLayout(4, 16, 16, 128, 16);
+      expect(layout.cols).toBe(4);
+      expect(layout.rows).toBe(1);
+      expect(layout.width).toBe(64);
+      expect(layout.height).toBe(16);
+    });
+
+    it('arranges multi-frame GIF frames as a compact table onto canvas', () => {
+      const multiFrameGifPath = allDesktopGifs.find((p) => !p.includes('dancing-duck-karlo')) || sampleGifPath;
+      if (!fs.existsSync(multiFrameGifPath)) return;
+
+      const buffer = fs.readFileSync(multiFrameGifPath);
+      const decoded = decodeGif(buffer);
+
+      const frameW = 16;
+      const frameH = 16;
+      const frames = convertGifFramesToGrids(decoded, {
+        threshold: 128,
+        targetWidth: frameW,
+        targetHeight: frameH,
+      });
+
+      const frameCount = frames.length;
+      const layout = calculateCompactTableLayout(frameCount, frameW, frameH, 128, 64);
+      if (frameCount >= 3) {
+        expect(layout.rows).toBeGreaterThan(1);
+      }
+
+      const canvasGrid = new BwpxGrid(layout.width + 10, layout.height + 10);
+      const startX = 0;
+      const startY = 0;
+
+      // Stamp each frame in table order
+      frames.forEach((frame, idx) => {
+        const col = idx % layout.cols;
+        const row = Math.floor(idx / layout.cols);
+        canvasGrid.blit(frame.grid, startX + col * frameW, startY + row * frameH, true);
+      });
+
+      // Verify each frame slice at (col * w, row * h)
+      frames.forEach((frame, idx) => {
+        const col = idx % layout.cols;
+        const row = Math.floor(idx / layout.cols);
+        const slice = canvasGrid.getSubRect(startX + col * frameW, startY + row * frameH, frameW, frameH);
+        expect(slice.countOn()).toBe(frame.grid.countOn());
+      });
+    });
+  });
+
 
   it('renders pixels without renderBwpxCanvas clearing the drawn canvas', () => {
     const drawnOperations: string[] = [];
