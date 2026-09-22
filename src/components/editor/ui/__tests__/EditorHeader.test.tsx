@@ -78,4 +78,32 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
     expect(html).toContain('Export');
     expect(html).not.toContain('<span>PNG</span>');
   });
+
+  it('renders division and Share button next to Export', () => {
+    const html = renderToString(<EditorHeader {...defaultProps} />);
+
+    // Renders division and Share button
+    expect(html).toContain('Share');
+    expect(html).toContain('bg-gradient-to-b from-transparent via-[#2c3344] to-transparent');
+  });
+
+  it('renders connected peer badges next to Share button when peers are present', () => {
+    const peers = [
+      { id: '1', name: 'montreal-wolf', color: '#06b6d4' },
+      { id: '2', name: 'tokyo-kitsune', color: '#f43f5e' },
+    ];
+    const html = renderToString(<EditorHeader {...defaultProps} connectedPeers={peers} />);
+
+    expect(html).toContain('2 connected peer(s)');
+    expect(html).toContain('MW');
+    expect(html).toContain('TK');
+    expect(html).toContain('background-color:#06b6d4');
+    expect(html).toContain('background-color:#f43f5e');
+  });
+
+  it('does not render peer badges when connectedPeers is empty', () => {
+    const html = renderToString(<EditorHeader {...defaultProps} connectedPeers={[]} />);
+
+    expect(html).not.toContain('connected peer(s)');
+  });
 });

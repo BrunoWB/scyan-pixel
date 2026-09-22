@@ -81,7 +81,7 @@ export const SaveExportMenu: React.FC<SaveExportMenuProps> = ({
         title="Save, Download, or Export project assets"
       >
         <Download className="w-3.5 h-3.5 text-[#00f0ff]" />
-        <span className="font-medium tracking-wide">Save / Export</span>
+        <span className="font-medium tracking-wide">Export</span>
         <ChevronDown
           className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${
             isOpen ? 'rotate-180 text-white' : ''

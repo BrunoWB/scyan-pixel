@@ -7,12 +7,15 @@ import {
   FlipHorizontal,
   FlipVertical,
   Upload,
+  Share2,
 } from 'lucide-react';
 import { BrandIdentityLogo, BrandWolfMascot } from '../../brand/BrandIdentityLogo';
 import { ColorPicker } from '../../ColorPicker';
 import { RecentPalette, type RecentPaletteHandle } from '../../RecentPalette';
 import { BackgroundPicker } from '../../BackgroundPicker';
 import { SaveExportMenu } from './SaveExportMenu';
+import { PeerAvatar } from './PeerAvatar';
+import type { ConnectedPeer } from '../../../core/peer/peerIdentity';
 
 export interface EditorHeaderProps {
   title?: string;
@@ -52,6 +55,9 @@ export interface EditorHeaderProps {
   onDownloadCHeader?: () => void;
   selectionBounds?: { width: number; height: number } | null;
   canvasDimensions?: { width: number; height: number };
+  // Share & Peer Collaboration
+  onOpenShareModal?: () => void;
+  connectedPeers?: ConnectedPeer[];
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = ({
@@ -87,6 +93,8 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   onDownloadCHeader,
   selectionBounds,
   canvasDimensions,
+  onOpenShareModal,
+  connectedPeers = [],
 }) => {
 
   return (
@@ -294,6 +302,59 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           selectionBounds={selectionBounds}
           canvasDimensions={canvasDimensions}
         />
+
+        {/* Division next to Export */}
+        <div className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0" />
+
+        {/* Share Button & Connected Peers next to it */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={onOpenShareModal}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] rounded-md text-xs text-slate-200 hover:text-white transition-all shadow-xs cursor-pointer active:scale-98"
+            title="Share canvas & manage peer session"
+          >
+            <Share2 className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline font-medium">Share</span>
+            {connectedPeers.length > 0 && (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                {connectedPeers.length}
+              </span>
+            )}
+          </button>
+
+          {/* Connected peers next to it (if any yet) */}
+          {connectedPeers.length > 0 && (
+            <div
+              className="flex items-center -space-x-1.5 pl-0.5 cursor-pointer"
+              onClick={onOpenShareModal}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenShareModal?.();
+                }
+              }}
+              title={`${connectedPeers.length} connected peer(s)`}
+            >
+              {connectedPeers.slice(0, 4).map((peer) => (
+                <PeerAvatar
+                  key={peer.id}
+                  name={peer.name}
+                  color={peer.color}
+                  size="sm"
+                  showTooltip
+                />
+              ))}
+              {connectedPeers.length > 4 && (
+                <div className="w-6 h-6 rounded-full bg-[#1c2230] border border-[#2d374d] text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">
+                  +{connectedPeers.length - 4}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

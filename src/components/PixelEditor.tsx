@@ -32,11 +32,13 @@ import {
 import { useEditorHistory } from './editor/hooks/useEditorHistory';
 import { useViewport } from './editor/hooks/useViewport';
 import { useSelectionManager } from './editor/hooks/useSelectionManager';
+import { usePeerSession } from './editor/hooks/usePeerSession';
 import { EditorHeader } from './editor/ui/EditorHeader';
 import { EditorToolbar } from './editor/ui/EditorToolbar';
 import { EditorCanvas } from './editor/ui/EditorCanvas';
 import { EditorStatusBar } from './editor/ui/EditorStatusBar';
 import { ExportModal } from './editor/ui/ExportModal';
+import { ShareModal } from './editor/ui/ShareModal';
 
 // Re-export public API symbols for complete backwards compatibility
 export type { ToolType, ThemePreset, BwpxEditorProps, PixelEditorProps };
@@ -220,6 +222,9 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isHeaderHovered, setIsHeaderHovered] = useState<boolean>(false);
 
+  // 7. Peer Collaboration & Sharing State
+  const peerSession = usePeerSession();
+
   // File import ref and trigger
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -342,7 +347,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (modalContent || isImportModalOpen) return;
+      if (modalContent || isImportModalOpen || peerSession.isShareModalOpen) return;
 
       if (e.key === 'Escape') {
         if (ghostPlacementRef.current) {
@@ -553,6 +558,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   }, [
     modalContent,
     isImportModalOpen,
+    peerSession.isShareModalOpen,
     undo,
     redo,
     isSpaceHeld,
@@ -1170,6 +1176,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onDownloadCHeader={handleDownloadCHeader}
         selectionBounds={selection && selection.active ? { width: selection.w, height: selection.h } : null}
         canvasDimensions={{ width: grid.width, height: grid.height }}
+        onOpenShareModal={peerSession.openShareModal}
+        connectedPeers={peerSession.connectedPeers}
       />
 
       {/* 2. MAIN WORKSPACE */}
@@ -1264,6 +1272,21 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         content={modalContent?.text || ''}
         accentColor={activePixelColor}
         onClose={() => setModalContent(null)}
+      />
+
+      {/* Share / Collaborative Canvas Modal */}
+      <ShareModal
+        isOpen={peerSession.isShareModalOpen}
+        onClose={peerSession.closeShareModal}
+        profile={peerSession.profile}
+        onUpdateProfile={peerSession.updateProfile}
+        onRandomizeName={peerSession.randomizeName}
+        onRandomizeColor={peerSession.randomizeColor}
+        onRandomizeProfile={peerSession.randomizeProfile}
+        roomId={peerSession.roomId}
+        shareUrl={peerSession.getShareUrl()}
+        onGenerateNewRoom={peerSession.generateNewRoom}
+        connectedPeers={peerSession.connectedPeers}
       />
 
       {/* Hidden File Input for Image Import Dialog */}
