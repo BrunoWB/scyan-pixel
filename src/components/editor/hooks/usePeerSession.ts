@@ -265,59 +265,28 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   }, []);
 
   const ensureActiveRoom = useCallback(
-    (grid?: PixelGrid): string => {
-      const activeName = roomId || generateRoomName(profile.name);
+    (_grid?: PixelGrid): string => {
+      const activeName = roomIdRef.current || roomId || generateRoomName(profile.name);
       const activeUuid =
+        roomUuidRef.current ||
         roomUuid ||
         (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId());
 
       if (!isRoomActiveInUrl) {
         roomIdRef.current = activeName;
+        roomUuidRef.current = activeUuid;
         setRoomIdState(activeName);
         setRoomUuidState(activeUuid);
         setIsRoomActiveInUrl(true);
 
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined' && window.location) {
           window.location.hash = `room=${activeName}`;
         }
-
-        const currentGrid = grid || options?.getCurrentGrid?.();
-        const timestamps = options?.getCurrentTimestamps?.();
-        const pixelsWithTime: [number, number, string, number?][] = [];
-        if (currentGrid) {
-          currentGrid.forEachPixel((x, y, color) => {
-            const ts = timestamps?.get(x, y);
-            if (typeof ts === 'number' && ts > 0) {
-              pixelsWithTime.push([x, y, color, ts]);
-            } else {
-              pixelsWithTime.push([x, y, color]);
-            }
-          });
-        }
-
-        const initialSnapshot: RoomSnapshotData = {
-          roomId: activeUuid,
-          roomName: activeName,
-          roomUuid: activeUuid,
-          canvasData: {
-            width: currentGrid?.width ?? 64,
-            height: currentGrid?.height ?? 64,
-            pixels: pixelsWithTime,
-          },
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          width: currentGrid?.width ?? 64,
-          height: currentGrid?.height ?? 64,
-          pixels: pixelsWithTime,
-          pixelCount: currentGrid?.countOn() ?? 0,
-        };
-        saveRoomSnapshot(initialSnapshot);
-        setSavedRooms(listRoomSnapshots());
       }
 
       return activeName;
     },
-    [isRoomActiveInUrl, roomId, roomUuid, profile.name, options]
+    [isRoomActiveInUrl, roomId, roomUuid, profile.name]
   );
 
   const updateProfile = useCallback(
@@ -409,12 +378,29 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       targetRoomUuid?: string
     ) => {
       const activeRoomId = targetRoomName || roomIdRef.current || ensureActiveRoom(grid);
+      const isTargetingCurrent = !targetRoomName || targetRoomName === roomIdRef.current;
       const activeRoomUuid =
         targetRoomUuid ||
-        roomUuidRef.current ||
-        roomUuid ||
+        (isTargetingCurrent ? roomUuidRef.current || roomUuid : null) ||
         getStoredRoomUuid(activeRoomId) ||
         (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId());
+
+      if (isTargetingCurrent && !roomUuidRef.current) {
+        roomUuidRef.current = activeRoomUuid;
+        setRoomUuidState(activeRoomUuid);
+      }
+
+      const existing = loadRoomSnapshot(activeRoomId);
+      const pixelCount = grid.countOn();
+
+      // Defer saving until something is actually drawn or modified
+      if (pixelCount === 0 && !existing) {
+        return;
+      }
+
+      if (!isRoomActiveInUrl && isTargetingCurrent) {
+        ensureActiveRoom();
+      }
 
       const pixelsWithTime: [number, number, string, number?][] = [];
       grid.forEachPixel((x, y, color) => {
@@ -426,7 +412,6 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         }
       });
 
-      const existing = loadRoomSnapshot(activeRoomId);
       const snapshot: RoomSnapshotData = {
         roomId: activeRoomUuid,
         roomName: activeRoomId,
@@ -441,13 +426,13 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         width: grid.width,
         height: grid.height,
         pixels: pixelsWithTime,
-        pixelCount: grid.countOn(),
+        pixelCount,
       };
 
       saveRoomSnapshot(snapshot);
       setSavedRooms(listRoomSnapshots());
     },
-    [roomUuid, ensureActiveRoom]
+    [roomUuid, isRoomActiveInUrl, ensureActiveRoom]
   );
 
   const restoreRoom = useCallback(
@@ -519,42 +504,15 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
 
     const currentGrid = options?.getCurrentGrid?.();
-    const timestamps = options?.getCurrentTimestamps?.();
-    const pixelsWithTime: [number, number, string, number?][] = [];
-    if (currentGrid) {
-      currentGrid.forEachPixel((x, y, color) => {
-        const ts = timestamps?.get(x, y);
-        if (typeof ts === 'number' && ts > 0) {
-          pixelsWithTime.push([x, y, color, ts]);
-        } else {
-          pixelsWithTime.push([x, y, color]);
-        }
-      });
+    const count = currentGrid?.countOn() ?? 0;
+    if (count > 0 && currentGrid) {
+      saveRoom(currentGrid, options?.getCurrentTimestamps?.(), forkedName, forkedUuid);
     }
-
-    const snapshot: RoomSnapshotData = {
-      roomId: forkedUuid,
-      roomName: forkedName,
-      roomUuid: forkedUuid,
-      canvasData: {
-        width: currentGrid?.width ?? 64,
-        height: currentGrid?.height ?? 64,
-        pixels: pixelsWithTime,
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      width: currentGrid?.width ?? 64,
-      height: currentGrid?.height ?? 64,
-      pixels: pixelsWithTime,
-      pixelCount: currentGrid?.countOn() ?? 0,
-    };
-    saveRoomSnapshot(snapshot);
-    setSavedRooms(listRoomSnapshots());
 
     setRoomId(forkedName, forkedUuid);
     setIsConflictModalOpen(false);
     setConflictInfo(null);
-  }, [conflictInfo, profile.name, setRoomId, options]);
+  }, [conflictInfo, profile.name, saveRoom, setRoomId, options]);
 
   const broadcastMutation = useCallback(
     (mutation: CanvasMutationMessage) => {
