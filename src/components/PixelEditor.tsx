@@ -39,6 +39,14 @@ import { EditorCanvas } from './editor/ui/EditorCanvas';
 import { EditorStatusBar } from './editor/ui/EditorStatusBar';
 import { ExportModal } from './editor/ui/ExportModal';
 import { ShareModal } from './editor/ui/ShareModal';
+import {
+  diffGridPixels,
+  applyPixelDeltas,
+  getBrushDotPixels,
+  getLinePixels,
+  type CanvasMutationMessage,
+  type CanvasSnapshotMessage,
+} from '../core/peer/peerCanvasSync';
 
 // Re-export public API symbols for complete backwards compatibility
 export type { ToolType, ThemePreset, BwpxEditorProps, PixelEditorProps };
@@ -93,6 +101,11 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     initialGrid,
     onGridChange,
   });
+
+  const gridRef = useRef<BwpxGrid>(grid);
+  useEffect(() => {
+    gridRef.current = grid;
+  }, [grid]);
 
   // 3. Canvas & Viewport Hooks
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -223,7 +236,108 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const [isHeaderHovered, setIsHeaderHovered] = useState<boolean>(false);
 
   // 7. Peer Collaboration & Sharing State
-  const peerSession = usePeerSession();
+  const handleRemoteMutation = useCallback(
+    (mutation: CanvasMutationMessage) => {
+      if (mutation.type === 'clear') {
+        const next = gridRef.current.clone();
+        next.clear();
+        if (strokeGridRef.current) {
+          strokeGridRef.current.clear();
+        }
+        gridRef.current = next;
+        setGrid(next);
+        return;
+      }
+      if (mutation.type === 'pixels') {
+        const next = gridRef.current.clone();
+        applyPixelDeltas(next, mutation.pixels);
+        if (strokeGridRef.current) {
+          applyPixelDeltas(strokeGridRef.current, mutation.pixels);
+        }
+        gridRef.current = next;
+        setGrid(next);
+      }
+    },
+    [setGrid]
+  );
+
+  const handleRemoteSnapshot = useCallback(
+    (snapshot: CanvasSnapshotMessage) => {
+      if (!snapshot || !Array.isArray(snapshot.pixels)) return;
+      const next = new PixelGrid(
+        snapshot.width || gridRef.current.width,
+        snapshot.height || gridRef.current.height,
+        snapshot.pixels,
+        undefined,
+        activeDrawColor
+      );
+      if (strokeGridRef.current) {
+        strokeGridRef.current = next.clone();
+      }
+      gridRef.current = next;
+      setGrid(next);
+    },
+    [activeDrawColor, setGrid]
+  );
+
+  const handleGetSnapshot = useCallback((): CanvasSnapshotMessage => {
+    return {
+      type: 'snapshot',
+      width: gridRef.current.width,
+      height: gridRef.current.height,
+      pixels: gridRef.current.getAllColoredPixels(),
+      count: gridRef.current.countOn(),
+    };
+  }, []);
+
+  const peerSession = usePeerSession({
+    onRemoteMutation: handleRemoteMutation,
+    onRemoteSnapshot: handleRemoteSnapshot,
+    onGetSnapshot: handleGetSnapshot,
+  });
+
+  const commitAndBroadcast = useCallback(
+    (nextGrid: BwpxGrid) => {
+      const prev = gridRef.current;
+      gridRef.current = nextGrid;
+      commitGrid(nextGrid);
+      if (nextGrid.countOn() === 0 && prev.countOn() > 0) {
+        peerSession.broadcastClear();
+        return;
+      }
+      const diff = diffGridPixels(prev, nextGrid);
+      if (diff.length > 0) {
+        peerSession.broadcastPixels(diff);
+      }
+    },
+    [commitGrid, peerSession]
+  );
+
+  const handleUndo = useCallback(() => {
+    const prev = gridRef.current;
+    const next = undo();
+    if (next) {
+      gridRef.current = next;
+      const diff = diffGridPixels(prev, next);
+      if (diff.length > 0) {
+        peerSession.broadcastPixels(diff);
+      }
+    }
+    setGhost(null);
+  }, [undo, peerSession]);
+
+  const handleRedo = useCallback(() => {
+    const prev = gridRef.current;
+    const next = redo();
+    if (next) {
+      gridRef.current = next;
+      const diff = diffGridPixels(prev, next);
+      if (diff.length > 0) {
+        peerSession.broadcastPixels(diff);
+      }
+    }
+    setGhost(null);
+  }, [redo, peerSession]);
 
   // File import ref and trigger
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -245,7 +359,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
             const data = JSON.parse(ev.target?.result as string);
             if (data && typeof data.width === 'number' && typeof data.height === 'number') {
               const newGrid = new PixelGrid(data.width, data.height, data.pixels, data.coloredPixels);
-              commitGrid(newGrid);
+              commitAndBroadcast(newGrid);
             }
           } catch (err) {
             console.error('Failed to parse JSON project file:', err);
@@ -392,16 +506,14 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        setGhost(null);
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
         return;
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
-        redo();
-        setGhost(null);
+        handleRedo();
         return;
       }
 
@@ -458,7 +570,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       }
       if ((e.ctrlKey || e.metaKey) && k === 'x') {
         e.preventDefault();
-        cutSelection(grid, commitGrid);
+        cutSelection(grid, commitAndBroadcast);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && k === 'v') {
@@ -470,7 +582,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
           x: Math.round((-pan.x + vpW / 2) / zoom - 16),
           y: Math.round((-pan.y + vpH / 2) / zoom - 16),
         };
-        pasteSelection(grid, commitGrid, activeDrawColor, fallbackPos);
+        pasteSelection(grid, commitAndBroadcast, activeDrawColor, fallbackPos);
         return;
       }
       if ((e.ctrlKey || e.metaKey) && k === 'a') {
@@ -481,7 +593,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selection && selection.active) {
           e.preventDefault();
-          deleteSelection(grid, commitGrid);
+          deleteSelection(grid, commitAndBroadcast);
           return;
         }
       }
@@ -508,7 +620,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
               next.set(tx, ty, 1);
             }
           });
-          commitGrid(next);
+          commitAndBroadcast(next);
         }
       }
     };
@@ -559,12 +671,12 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     modalContent,
     isImportModalOpen,
     peerSession.isShareModalOpen,
-    undo,
-    redo,
+    handleUndo,
+    handleRedo,
     isSpaceHeld,
     selection,
     grid,
-    commitGrid,
+    commitAndBroadcast,
     setIsSpaceHeld,
     setIsPanning,
     copySelection,
@@ -580,10 +692,10 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   ]);
 
   // Transformations
-  const handleInvert = () => invertSelection(grid, commitGrid);
-  const handleFlipH = () => commitGrid(grid.flipH(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
-  const handleFlipV = () => commitGrid(grid.flipV(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
-  const handleRotate90 = () => commitGrid(grid.rotate90(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
+  const handleInvert = () => invertSelection(grid, commitAndBroadcast);
+  const handleFlipH = () => commitAndBroadcast(grid.flipH(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
+  const handleFlipV = () => commitAndBroadcast(grid.flipV(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
+  const handleRotate90 = () => commitAndBroadcast(grid.rotate90(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
 
   // Pointer Interaction Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -602,7 +714,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
             const row = Math.floor(i / cols);
             next.blit(frame.grid, targetX + col * frameW, targetY + row * frameH, true);
           });
-          commitGrid(next);
+          commitAndBroadcast(next);
           setSelection({
             x: targetX,
             y: targetY,
@@ -612,7 +724,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
           });
         } else {
           next.blit(gp.grid, targetX, targetY, true);
-          commitGrid(next);
+          commitAndBroadcast(next);
           setSelection({
             x: targetX,
             y: targetY,
@@ -641,7 +753,9 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         startPosRef.current = coords;
         currentCoordsRef.current = coords;
         strokeGridRef.current = next;
+        gridRef.current = next;
         commitGrid(next);
+        peerSession.broadcastPixels(getBrushDotPixels(x, y, brushSize, null));
         return;
       }
       setContextMenu({ x: e.clientX, y: e.clientY });
@@ -713,7 +827,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     if (activeTool === 'bucket') {
       const next = grid.clone();
       floodFill(next, x, y, 1, activeDrawColor);
-      commitGrid(next);
+      commitAndBroadcast(next);
       recentPaletteRef.current?.pushColor(activeDrawColor);
       return;
     }
@@ -725,7 +839,11 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       setIsDrawing(true);
       isDrawingRef.current = true;
       strokeGridRef.current = next;
+      gridRef.current = next;
       commitGrid(next);
+      peerSession.broadcastPixels(
+        getBrushDotPixels(x, y, brushSize, val === 0 ? null : activeDrawColor)
+      );
       if (val === 1) recentPaletteRef.current?.pushColor(activeDrawColor);
       return;
     }
@@ -786,8 +904,19 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
             brushSize,
             activeDrawColor
           );
+          peerSession.broadcastPixels(
+            getLinePixels(
+              prevCoords.x,
+              prevCoords.y,
+              coords.x,
+              coords.y,
+              brushSize,
+              val === 0 ? null : activeDrawColor
+            )
+          );
           startPosRef.current = coords;
           setStartPos(coords);
+          gridRef.current = strokeGridRef.current;
           setGrid(strokeGridRef.current);
         }
       }
@@ -836,7 +965,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         const color = p[2] || activeDrawColor;
         next.set(ghost.x + rx, ghost.y + ry, 1, color);
       });
-      commitGrid(next);
+      commitAndBroadcast(next);
       setSelection({
         x: ghost.x,
         y: ghost.y,
@@ -890,7 +1019,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         brushSize,
         activeDrawColor
       );
-      commitGrid(next);
+      commitAndBroadcast(next);
       recentPaletteRef.current?.pushColor(activeDrawColor);
     }
   };
@@ -1124,7 +1253,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
                 const data = JSON.parse(ev.target?.result as string);
                 if (data && typeof data.width === 'number' && typeof data.height === 'number') {
                   const newGrid = new PixelGrid(data.width, data.height, data.pixels, data.coloredPixels);
-                  commitGrid(newGrid);
+                  commitAndBroadcast(newGrid);
                 }
               } catch (err) {
                 console.error('Failed to parse JSON project file:', err);
@@ -1152,8 +1281,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         canRedo={canRedo}
         historyIndex={historyIndex}
         historyLength={historyLength}
-        onUndo={undo}
-        onRedo={redo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
         brushSize={brushSize}
         setBrushSize={setBrushSize}
         onRotate90={handleRotate90}
@@ -1242,7 +1371,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
-          onCut={() => cutSelection(grid, commitGrid)}
+          onCut={() => cutSelection(grid, commitAndBroadcast)}
           onCopy={() => copySelection(grid)}
           onPaste={() => {
             const container = containerRef.current;
@@ -1252,9 +1381,9 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
               x: Math.round((-pan.x + vpW / 2) / zoom - 16),
               y: Math.round((-pan.y + vpH / 2) / zoom - 16),
             };
-            pasteSelection(grid, commitGrid, activeDrawColor, fallbackPos);
+            pasteSelection(grid, commitAndBroadcast, activeDrawColor, fallbackPos);
           }}
-          onDelete={() => deleteSelection(grid, commitGrid)}
+          onDelete={() => deleteSelection(grid, commitAndBroadcast)}
           onImportFile={handleOpenImportDialog}
           onInvert={handleInvert}
           onFlipH={handleFlipH}

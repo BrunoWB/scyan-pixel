@@ -41,12 +41,14 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
     expect(html).toContain('Brush');
     expect(html).toContain('px');
 
-    // Contains HeroUI NumberField data-slot attributes
+    // Contains HeroUI NumberField data-slot attributes and visible Minus/Plus icons
     expect(html).toContain('data-slot="number-field"');
     expect(html).toContain('data-slot="number-field-group"');
     expect(html).toContain('data-slot="number-field-decrement-button"');
     expect(html).toContain('data-slot="number-field-input"');
     expect(html).toContain('data-slot="number-field-increment-button"');
+    expect(html).toContain('lucide-minus');
+    expect(html).toContain('lucide-plus');
 
     // Value matches current brush size
     expect(html).toContain('value="3"');

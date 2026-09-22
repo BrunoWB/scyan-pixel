@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { BwpxGrid } from '../../../core/PixelGrid';
 
 export const MAX_HISTORY_LENGTH = 50;
@@ -96,38 +96,38 @@ export function useEditorHistory({
     };
   });
 
+  const stateRef = useRef<HistoryState>(state);
+
   // Synchronize when initialGrid changes externally
-  const [prevInitialGrid, setPrevInitialGrid] = useState<BwpxGrid | undefined>(initialGrid);
-  if (initialGrid !== prevInitialGrid) {
-    setPrevInitialGrid(initialGrid);
-    if (initialGrid) {
-      setState({
+  const prevInitialGridRef = useRef<BwpxGrid | undefined>(initialGrid);
+  useEffect(() => {
+    if (initialGrid && initialGrid !== prevInitialGridRef.current) {
+      prevInitialGridRef.current = initialGrid;
+      const nextState: HistoryState = {
         history: [initialGrid.clone()],
         index: 0,
-      });
+      };
+      stateRef.current = nextState;
+      setState(nextState);
     }
-  }
-
-  const grid = state.history[state.index] ?? state.history[0];
+  }, [initialGrid]);
 
   const commitGrid = useCallback(
     (nextGrid: BwpxGrid) => {
       const nextCloned = nextGrid.clone();
-      setState((prev) => {
-        const trimmed = prev.history.slice(0, prev.index + 1);
-        trimmed.push(nextCloned);
-        if (trimmed.length > MAX_HISTORY_LENGTH) {
-          const sliced = trimmed.slice(trimmed.length - MAX_HISTORY_LENGTH);
-          return {
-            history: sliced,
-            index: sliced.length - 1,
-          };
-        }
-        return {
-          history: trimmed,
-          index: trimmed.length - 1,
-        };
-      });
+      const cur = stateRef.current;
+      const trimmed = cur.history.slice(0, cur.index + 1);
+      trimmed.push(nextCloned);
+      const history =
+        trimmed.length > MAX_HISTORY_LENGTH
+          ? trimmed.slice(trimmed.length - MAX_HISTORY_LENGTH)
+          : trimmed;
+      const nextState: HistoryState = {
+        history,
+        index: history.length - 1,
+      };
+      stateRef.current = nextState;
+      setState(nextState);
       onGridChange?.(nextCloned);
     },
     [onGridChange]
@@ -136,56 +136,70 @@ export function useEditorHistory({
   const setGrid = useCallback(
     (nextGrid: BwpxGrid) => {
       const nextCloned = nextGrid.clone();
-      setState((prev) => {
-        const copy = [...prev.history];
-        copy[prev.index] = nextCloned;
-        return {
-          ...prev,
-          history: copy,
-        };
-      });
+      const cur = stateRef.current;
+      const copy = [...cur.history];
+      copy[cur.index] = nextCloned;
+      const nextState: HistoryState = {
+        ...cur,
+        history: copy,
+      };
+      stateRef.current = nextState;
+      setState(nextState);
       onGridChange?.(nextCloned);
     },
     [onGridChange]
   );
 
-  const undo = useCallback(() => {
-    setState((prev) => {
-      if (prev.index <= 0) return prev;
-      const nextIndex = prev.index - 1;
-      onGridChange?.(prev.history[nextIndex]);
-      return {
-        ...prev,
-        index: nextIndex,
-      };
-    });
+  const undo = useCallback((): BwpxGrid | null => {
+    const cur = stateRef.current;
+    if (cur.index <= 0) return null;
+    const nextIndex = cur.index - 1;
+    const targetGrid = cur.history[nextIndex];
+    const nextState: HistoryState = {
+      ...cur,
+      index: nextIndex,
+    };
+    stateRef.current = nextState;
+    setState(nextState);
+    onGridChange?.(targetGrid);
+    return targetGrid;
   }, [onGridChange]);
 
-  const redo = useCallback(() => {
-    setState((prev) => {
-      if (prev.index >= prev.history.length - 1) return prev;
-      const nextIndex = prev.index + 1;
-      onGridChange?.(prev.history[nextIndex]);
-      return {
-        ...prev,
-        index: nextIndex,
-      };
-    });
+  const redo = useCallback((): BwpxGrid | null => {
+    const cur = stateRef.current;
+    if (cur.index >= cur.history.length - 1) return null;
+    const nextIndex = cur.index + 1;
+    const targetGrid = cur.history[nextIndex];
+    const nextState: HistoryState = {
+      ...cur,
+      index: nextIndex,
+    };
+    stateRef.current = nextState;
+    setState(nextState);
+    onGridChange?.(targetGrid);
+    return targetGrid;
   }, [onGridChange]);
-
-  const canUndo = state.index > 0;
-  const canRedo = state.index < state.history.length - 1;
 
   return {
-    grid,
+    get grid() {
+      return stateRef.current.history[stateRef.current.index] ?? stateRef.current.history[0];
+    },
     setGrid,
     commitGrid,
     undo,
     redo,
-    canUndo,
-    canRedo,
-    historyIndex: state.index,
-    historyLength: state.history.length,
+    get canUndo() {
+      return stateRef.current.index > 0;
+    },
+    get canRedo() {
+      return stateRef.current.index < stateRef.current.history.length - 1;
+    },
+    get historyIndex() {
+      return stateRef.current.index;
+    },
+    get historyLength() {
+      return stateRef.current.history.length;
+    },
   };
 }
 

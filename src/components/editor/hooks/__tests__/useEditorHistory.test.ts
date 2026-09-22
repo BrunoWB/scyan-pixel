@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { EditorHistory } from '../useEditorHistory';
+import React from 'react';
+import { renderToString } from 'react-dom/server';
+import { EditorHistory, useEditorHistory } from '../useEditorHistory';
 import { BwpxGrid } from '../../../../core/PixelGrid';
 
 describe('EditorHistory engine', () => {
@@ -93,5 +95,30 @@ describe('EditorHistory engine', () => {
       expect(history.historyIndex).toBeLessThan(history.length);
       expect(history.historyIndex).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('useEditorHistory hook provides history state with working getters', () => {
+    function TestComponent() {
+      const history = useEditorHistory({ initialWidth: 16, initialHeight: 16 });
+      const summary = {
+        canUndo: history.canUndo,
+        canRedo: history.canRedo,
+        historyIndex: history.historyIndex,
+        historyLength: history.historyLength,
+      };
+      return React.createElement('div', {
+        id: 'history-summary',
+        'data-json': JSON.stringify(summary),
+      });
+    }
+
+    const html = renderToString(React.createElement(TestComponent));
+    const match = html.match(/data-json="([^"]+)"/);
+    expect(match).not.toBeNull();
+    const summary = JSON.parse(match![1].replace(/&quot;/g, '"'));
+    expect(summary.canUndo).toBe(false);
+    expect(summary.canRedo).toBe(false);
+    expect(summary.historyIndex).toBe(0);
+    expect(summary.historyLength).toBe(1);
   });
 });

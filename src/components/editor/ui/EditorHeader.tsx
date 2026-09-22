@@ -8,6 +8,8 @@ import {
   FlipVertical,
   Upload,
   Share2,
+  Minus,
+  Plus,
 } from 'lucide-react';
 import { BrandIdentityLogo, BrandWolfMascot } from '../../brand/BrandIdentityLogo';
 import { ColorPicker } from '../../ColorPicker';
@@ -146,11 +148,11 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
         {/* Action Controls: Undo/Redo, Brush Size, Transforms (scrollable on narrow screens) */}
         <div className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto py-1">
           {/* Undo / Redo */}
-          <div className="flex items-center gap-0.5 shrink-0 bg-[#090b10] border border-[#1e2332] rounded-md p-0.5">
+          <div className="flex items-center gap-1 shrink-0 bg-[#090b10] border border-[#1e2332] rounded-md px-1.5 py-1">
             <button
               onClick={onUndo}
               disabled={!canUndo}
-              className={`p-1.5 rounded hover:bg-[#1c2230] transition cursor-pointer ${
+              className={`p-2 rounded-md hover:bg-[#1c2230] transition cursor-pointer ${
                 !canUndo ? 'opacity-30 cursor-not-allowed' : 'text-slate-300 hover:text-white'
               }`}
               title="Undo (Ctrl+Z)"
@@ -160,23 +162,23 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
             <button
               onClick={onRedo}
               disabled={!canRedo}
-              className={`p-1.5 rounded hover:bg-[#1c2230] transition cursor-pointer ${
+              className={`p-2 rounded-md hover:bg-[#1c2230] transition cursor-pointer ${
                 !canRedo ? 'opacity-30 cursor-not-allowed' : 'text-slate-300 hover:text-white'
               }`}
               title="Redo (Ctrl+Y)"
             >
               <Redo2 className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[10px] font-mono text-slate-500 px-1 select-none">
+            <span className="text-[10px] font-mono text-slate-500 px-2 select-none">
               {historyIndex}/{Math.max(0, historyLength - 1)}
             </span>
           </div>
 
-          <div className="h-4 w-[1px] bg-[#222836] shrink-0" />
+          <div className="h-4.5 w-[1px] bg-[#222836] shrink-0" />
 
           {/* Brush Size Numerical Picker (HeroUI / Scyan Studio Design System) */}
-          <div className="flex items-center gap-1.5 bg-[#090b10] px-2 py-0.5 rounded-md border border-[#1e2332] shrink-0">
-            <span className="text-[10px] text-slate-400 font-medium select-none">
+          <div className="flex items-center gap-2 bg-[#090b10] px-2.5 py-1 rounded-md border border-[#1e2332] shrink-0">
+            <span className="text-[11px] text-slate-300 font-medium select-none">
               Brush
             </span>
             <NumberField
@@ -190,57 +192,61 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
               maxValue={64}
               step={1}
               aria-label="Brush size in pixels"
-              className="w-20 text-xs font-mono"
+              className="w-22 text-xs font-mono"
             >
-              <NumberField.Group className="!h-6 !grid-cols-[18px_1fr_18px] !bg-[#0b0d13] !border-[#1e2538] rounded-md px-0.5 hover:border-[#2d3748] focus-within:!border-[#00f0ff]/70 transition-colors">
+              <NumberField.Group className="!h-7 !grid-cols-[20px_1fr_20px] !bg-[#0b0d13] !border-[#1e2538] rounded-md px-0.5 hover:border-[#2d3748] focus-within:!border-[#00f0ff]/70 transition-colors">
                 <NumberField.DecrementButton
                   aria-label="Decrease brush size"
-                  className="!size-4.5 text-[#94a3b8] hover:text-white hover:bg-[#19202f] rounded flex items-center justify-center cursor-pointer text-[10px] transition-colors"
-                />
+                  className="!size-5 !border-none !text-slate-300 hover:!text-white hover:bg-[#1c2230] disabled:!opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent rounded flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <Minus className="w-3 h-3 stroke-[2.25] text-slate-300 pointer-events-none" />
+                </NumberField.DecrementButton>
                 <NumberField.Input className="text-center font-mono text-[11px] text-white !py-0 !px-1 focus:outline-none bg-transparent" />
                 <NumberField.IncrementButton
                   aria-label="Increase brush size"
-                  className="!size-4.5 text-[#94a3b8] hover:text-white hover:bg-[#19202f] rounded flex items-center justify-center cursor-pointer text-[10px] transition-colors"
-                />
+                  className="!size-5 !border-none !text-slate-300 hover:!text-white hover:bg-[#1c2230] disabled:!opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent rounded flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <Plus className="w-3 h-3 stroke-[2.25] text-slate-300 pointer-events-none" />
+                </NumberField.IncrementButton>
               </NumberField.Group>
             </NumberField>
-            <span className="text-[10px] font-mono text-[#64748b] select-none">px</span>
+            <span className="text-[11px] font-mono text-slate-400 select-none">px</span>
             <div
-              className="w-3.5 h-3.5 rounded-xs bg-[#0b0d13] border border-[#1e2538] flex items-center justify-center overflow-hidden shrink-0 ml-0.5"
+              className="w-4 h-4 rounded-xs bg-[#0b0d13] border border-[#1e2538] flex items-center justify-center overflow-hidden shrink-0 ml-0.5"
               title={`Brush size preview (${brushSize}px)`}
             >
               <div
                 className="rounded-[1px]"
                 style={{
-                  width: `${Math.min(10, Math.max(2, brushSize))}px`,
-                  height: `${Math.min(10, Math.max(2, brushSize))}px`,
+                  width: `${Math.min(12, Math.max(2, brushSize))}px`,
+                  height: `${Math.min(12, Math.max(2, brushSize))}px`,
                   backgroundColor: activePixelColor,
                 }}
               />
             </div>
           </div>
 
-          <div className="h-4 w-[1px] bg-[#222836] shrink-0" />
+          <div className="h-4.5 w-[1px] bg-[#222836] shrink-0" />
 
           {/* Canvas Transforms */}
-          <div className="flex items-center gap-0.5 shrink-0 bg-[#090b10] border border-[#1e2332] rounded-md p-0.5">
+          <div className="flex items-center gap-1 shrink-0 bg-[#090b10] border border-[#1e2332] rounded-md px-1.5 py-1">
             <button
               onClick={onRotate90}
-              className="p-1.5 rounded hover:bg-[#1c2230] text-slate-400 hover:text-white transition cursor-pointer"
+              className="p-2 rounded-md hover:bg-[#1c2230] text-slate-300 hover:text-white transition cursor-pointer"
               title="Rotate 90° Clockwise"
             >
               <RotateCw className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={onFlipH}
-              className="p-1.5 rounded hover:bg-[#1c2230] text-slate-400 hover:text-white transition cursor-pointer"
+              className="p-2 rounded-md hover:bg-[#1c2230] text-slate-300 hover:text-white transition cursor-pointer"
               title="Flip Horizontally"
             >
               <FlipHorizontal className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={onFlipV}
-              className="p-1.5 rounded hover:bg-[#1c2230] text-slate-400 hover:text-white transition cursor-pointer"
+              className="p-2 rounded-md hover:bg-[#1c2230] text-slate-300 hover:text-white transition cursor-pointer"
               title="Flip Vertically"
             >
               <FlipVertical className="w-3.5 h-3.5" />
