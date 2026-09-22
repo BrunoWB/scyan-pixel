@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { PixelGrid, PixelGrid as BwpxGrid } from '../core/PixelGrid';
+import { PixelGrid, PixelGrid as BwpxGrid, unpackCoord } from '../core/PixelGrid';
 import {
   drawLine,
   floodFill,
@@ -39,14 +39,22 @@ import { EditorCanvas } from './editor/ui/EditorCanvas';
 import { EditorStatusBar } from './editor/ui/EditorStatusBar';
 import { ExportModal } from './editor/ui/ExportModal';
 import { ShareModal } from './editor/ui/ShareModal';
+import { RoomConflictModal } from './editor/ui/RoomConflictModal';
 import {
   diffGridPixels,
   applyPixelDeltas,
   getBrushDotPixels,
   getLinePixels,
+  PixelTimestampTracker,
+  reconcileGridSnapshots,
   type CanvasMutationMessage,
   type CanvasSnapshotMessage,
 } from '../core/peer/peerCanvasSync';
+import {
+  loadRoomSnapshot,
+  type RoomSnapshotData,
+} from '../core/peer/peerRoomStorage';
+
 
 // Re-export public API symbols for complete backwards compatibility
 export type { ToolType, ThemePreset, BwpxEditorProps, PixelEditorProps };
@@ -236,9 +244,38 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const [isHeaderHovered, setIsHeaderHovered] = useState<boolean>(false);
 
   // 7. Peer Collaboration & Sharing State
+  const pixelTimestampsRef = useRef<PixelTimestampTracker>(new PixelTimestampTracker());
+  const discardLocalOnNextSnapshotRef = useRef<boolean>(false);
+  const peerSessionRef = useRef<ReturnType<typeof usePeerSession> | null>(null);
+
+  const handleRestoreSnapshot = useCallback(
+    (snapshot: RoomSnapshotData) => {
+      const next = new PixelGrid(
+        snapshot.width,
+        snapshot.height,
+        undefined,
+        undefined,
+        activeDrawColor
+      );
+      pixelTimestampsRef.current.clear(snapshot.updatedAt || Date.now());
+      for (const p of snapshot.pixels) {
+        next.set(p[0], p[1], 1, p[2]);
+        if (typeof p[3] === 'number') {
+          pixelTimestampsRef.current.set(p[0], p[1], p[3]);
+        }
+      }
+      gridRef.current = next;
+      setGrid(next);
+      fitToView(next);
+    },
+    [activeDrawColor, setGrid, fitToView]
+  );
+
   const handleRemoteMutation = useCallback(
     (mutation: CanvasMutationMessage) => {
       if (mutation.type === 'clear') {
+        const now = mutation.timestamp ?? Date.now();
+        pixelTimestampsRef.current.clear(now);
         const next = gridRef.current.clone();
         next.clear();
         if (strokeGridRef.current) {
@@ -250,9 +287,9 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       }
       if (mutation.type === 'pixels') {
         const next = gridRef.current.clone();
-        applyPixelDeltas(next, mutation.pixels);
+        applyPixelDeltas(next, mutation.pixels, pixelTimestampsRef.current);
         if (strokeGridRef.current) {
-          applyPixelDeltas(strokeGridRef.current, mutation.pixels);
+          applyPixelDeltas(strokeGridRef.current, mutation.pixels, pixelTimestampsRef.current);
         }
         gridRef.current = next;
         setGrid(next);
@@ -264,29 +301,71 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const handleRemoteSnapshot = useCallback(
     (snapshot: CanvasSnapshotMessage) => {
       if (!snapshot || !Array.isArray(snapshot.pixels)) return;
-      const next = new PixelGrid(
-        snapshot.width || gridRef.current.width,
-        snapshot.height || gridRef.current.height,
-        snapshot.pixels,
-        undefined,
-        activeDrawColor
-      );
-      if (strokeGridRef.current) {
-        strokeGridRef.current = next.clone();
+      const currentGrid = gridRef.current;
+      const isDiscard = discardLocalOnNextSnapshotRef.current;
+      discardLocalOnNextSnapshotRef.current = false;
+
+      if (isDiscard || currentGrid.countOn() === 0) {
+        const next = new PixelGrid(
+          snapshot.width || currentGrid.width,
+          snapshot.height || currentGrid.height,
+          undefined,
+          undefined,
+          activeDrawColor
+        );
+        pixelTimestampsRef.current.clear(snapshot.clearTimestamp ?? snapshot.timestamp ?? Date.now());
+        for (const p of snapshot.pixels) {
+          next.set(p[0], p[1], 1, p[2]);
+          const ts = p[3] ?? snapshot.timestamp ?? 0;
+          pixelTimestampsRef.current.set(p[0], p[1], ts);
+        }
+        if (strokeGridRef.current) {
+          strokeGridRef.current = next.clone();
+        }
+        gridRef.current = next;
+        setGrid(next);
+        peerSessionRef.current?.saveRoom(next, pixelTimestampsRef.current);
+        return;
       }
-      gridRef.current = next;
-      setGrid(next);
+
+      // Merge remote snapshot with local offline edits using LWW per-pixel
+      const next = currentGrid.clone();
+      const result = reconcileGridSnapshots(next, pixelTimestampsRef.current, snapshot);
+      if (result.appliedDeltas.length > 0) {
+        if (strokeGridRef.current) {
+          strokeGridRef.current = next.clone();
+        }
+        gridRef.current = next;
+        setGrid(next);
+        peerSessionRef.current?.saveRoom(next, pixelTimestampsRef.current);
+      }
     },
     [activeDrawColor, setGrid]
   );
 
   const handleGetSnapshot = useCallback((): CanvasSnapshotMessage => {
+    const pixelsWithTs: [number, number, string, number][] = [];
+    gridRef.current.forEachPixel((x, y, color) => {
+      const ts = pixelTimestampsRef.current.get(x, y);
+      pixelsWithTs.push([x, y, color, ts]);
+    });
+    const deletedPixels: [number, number, number][] = [];
+    const clearTs = pixelTimestampsRef.current.getClearTime();
+    for (const [key, ts] of pixelTimestampsRef.current.getMap().entries()) {
+      const [x, y] = unpackCoord(key);
+      if (!gridRef.current.get(x, y) && ts > clearTs) {
+        deletedPixels.push([x, y, ts]);
+      }
+    }
     return {
       type: 'snapshot',
       width: gridRef.current.width,
       height: gridRef.current.height,
-      pixels: gridRef.current.getAllColoredPixels(),
+      pixels: pixelsWithTs,
+      deletedPixels: deletedPixels.length > 0 ? deletedPixels : undefined,
       count: gridRef.current.countOn(),
+      timestamp: Date.now(),
+      clearTimestamp: clearTs,
     };
   }, []);
 
@@ -294,50 +373,93 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     onRemoteMutation: handleRemoteMutation,
     onRemoteSnapshot: handleRemoteSnapshot,
     onGetSnapshot: handleGetSnapshot,
+    onRestoreSnapshot: handleRestoreSnapshot,
+    onDiscardLocalConflict: () => {
+      discardLocalOnNextSnapshotRef.current = true;
+    },
+    getCurrentGrid: () => gridRef.current,
+    getCurrentTimestamps: () => pixelTimestampsRef.current,
   });
+
+  useEffect(() => {
+    peerSessionRef.current = peerSession;
+  }, [peerSession]);
+
+  // Load initial local room snapshot if URL hash specified a room that has a saved snapshot
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.location?.hash) return;
+    const match = window.location.hash.match(/#room=([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      const saved = loadRoomSnapshot(match[1]);
+      if (saved && saved.pixels.length > 0 && gridRef.current.countOn() === 0) {
+        handleRestoreSnapshot(saved);
+      }
+    }
+  }, [handleRestoreSnapshot]);
 
   const commitAndBroadcast = useCallback(
     (nextGrid: BwpxGrid) => {
+      peerSession.ensureActiveRoom(nextGrid);
       const prev = gridRef.current;
       gridRef.current = nextGrid;
       commitGrid(nextGrid);
+      const now = Date.now();
       if (nextGrid.countOn() === 0 && prev.countOn() > 0) {
+        pixelTimestampsRef.current.clear(now);
         peerSession.broadcastClear();
+        peerSession.saveRoom(nextGrid, pixelTimestampsRef.current);
         return;
       }
-      const diff = diffGridPixels(prev, nextGrid);
+      const diff = diffGridPixels(prev, nextGrid, now);
       if (diff.length > 0) {
+        for (let i = 0; i < diff.length; i++) {
+          pixelTimestampsRef.current.set(diff[i][0], diff[i][1], now);
+        }
         peerSession.broadcastPixels(diff);
       }
+      peerSession.saveRoom(nextGrid, pixelTimestampsRef.current);
     },
     [commitGrid, peerSession]
   );
 
   const handleUndo = useCallback(() => {
+    peerSession.ensureActiveRoom();
     const prev = gridRef.current;
     const next = undo();
     if (next) {
       gridRef.current = next;
-      const diff = diffGridPixels(prev, next);
+      const now = Date.now();
+      const diff = diffGridPixels(prev, next, now);
       if (diff.length > 0) {
+        for (let i = 0; i < diff.length; i++) {
+          pixelTimestampsRef.current.set(diff[i][0], diff[i][1], now);
+        }
         peerSession.broadcastPixels(diff);
       }
+      peerSession.saveRoom(next, pixelTimestampsRef.current);
     }
     setGhost(null);
   }, [undo, peerSession]);
 
   const handleRedo = useCallback(() => {
+    peerSession.ensureActiveRoom();
     const prev = gridRef.current;
     const next = redo();
     if (next) {
       gridRef.current = next;
-      const diff = diffGridPixels(prev, next);
+      const now = Date.now();
+      const diff = diffGridPixels(prev, next, now);
       if (diff.length > 0) {
+        for (let i = 0; i < diff.length; i++) {
+          pixelTimestampsRef.current.set(diff[i][0], diff[i][1], now);
+        }
         peerSession.broadcastPixels(diff);
       }
+      peerSession.saveRoom(next, pixelTimestampsRef.current);
     }
     setGhost(null);
   }, [redo, peerSession]);
+
 
   // File import ref and trigger
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -742,6 +864,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
     if (e.button === 2) {
       if (activeTool === 'pencil') {
+        peerSession.ensureActiveRoom();
         const coords = getGridCoords(e.clientX, e.clientY);
         const { x, y } = coords;
         const next = grid.clone();
@@ -755,7 +878,10 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         strokeGridRef.current = next;
         gridRef.current = next;
         commitGrid(next);
-        peerSession.broadcastPixels(getBrushDotPixels(x, y, brushSize, null));
+        const now = Date.now();
+        pixelTimestampsRef.current.set(x, y, now);
+        peerSession.broadcastPixels(getBrushDotPixels(x, y, brushSize, null, now));
+        peerSession.saveRoom(next, pixelTimestampsRef.current);
         return;
       }
       setContextMenu({ x: e.clientX, y: e.clientY });
@@ -825,6 +951,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     }
 
     if (activeTool === 'bucket') {
+      peerSession.ensureActiveRoom();
       const next = grid.clone();
       floodFill(next, x, y, 1, activeDrawColor);
       commitAndBroadcast(next);
@@ -833,6 +960,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     }
 
     if (activeTool === 'pencil' || activeTool === 'eraser') {
+      peerSession.ensureActiveRoom();
       const next = grid.clone();
       const val = activeTool === 'eraser' ? 0 : 1;
       drawBrushDot(next, x, y, val, brushSize, activeDrawColor);
@@ -841,14 +969,18 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       strokeGridRef.current = next;
       gridRef.current = next;
       commitGrid(next);
+      const now = Date.now();
+      pixelTimestampsRef.current.set(x, y, now);
       peerSession.broadcastPixels(
-        getBrushDotPixels(x, y, brushSize, val === 0 ? null : activeDrawColor)
+        getBrushDotPixels(x, y, brushSize, val === 0 ? null : activeDrawColor, now)
       );
+      peerSession.saveRoom(next, pixelTimestampsRef.current);
       if (val === 1) recentPaletteRef.current?.pushColor(activeDrawColor);
       return;
     }
 
     // Shape tools begin dragging preview
+    peerSession.ensureActiveRoom();
     setIsDrawing(true);
     isDrawingRef.current = true;
   };
@@ -904,16 +1036,20 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
             brushSize,
             activeDrawColor
           );
-          peerSession.broadcastPixels(
-            getLinePixels(
-              prevCoords.x,
-              prevCoords.y,
-              coords.x,
-              coords.y,
-              brushSize,
-              val === 0 ? null : activeDrawColor
-            )
+          const now = Date.now();
+          const linePixels = getLinePixels(
+            prevCoords.x,
+            prevCoords.y,
+            coords.x,
+            coords.y,
+            brushSize,
+            val === 0 ? null : activeDrawColor,
+            now
           );
+          for (const lp of linePixels) {
+            pixelTimestampsRef.current.set(lp[0], lp[1], now);
+          }
+          peerSession.broadcastPixels(linePixels);
           startPosRef.current = coords;
           setStartPos(coords);
           gridRef.current = strokeGridRef.current;
@@ -998,6 +1134,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     if (activeTool === 'select') return;
 
     if (activeTool === 'pencil' || activeTool === 'eraser') {
+      peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current);
       return;
     }
 
@@ -1413,9 +1550,21 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onRandomizeColor={peerSession.randomizeColor}
         onRandomizeProfile={peerSession.randomizeProfile}
         roomId={peerSession.roomId}
+        roomUuid={peerSession.roomUuid}
         shareUrl={peerSession.getShareUrl()}
         onGenerateNewRoom={peerSession.generateNewRoom}
         connectedPeers={peerSession.connectedPeers}
+        savedRooms={peerSession.savedRooms}
+        onRestoreRoom={peerSession.restoreRoom}
+        onDeleteRoom={peerSession.deleteRoom}
+      />
+
+      {/* Room ID Conflict Resolution Modal */}
+      <RoomConflictModal
+        isOpen={peerSession.isConflictModalOpen}
+        conflict={peerSession.conflictInfo}
+        onDiscardLocalAndJoin={peerSession.resolveConflictDiscardLocalAndJoin}
+        onKeepLocal={peerSession.resolveConflictKeepLocal}
       />
 
       {/* Hidden File Input for Image Import Dialog */}

@@ -188,3 +188,80 @@ export const PREBAKED_ANIMALS: readonly string[] = [
   'gaupe',
   'hval',
 ];
+
+export const PREBAKED_ACTIONS: readonly string[] = [
+  'roar',
+  'leap',
+  'dash',
+  'dance',
+  'sleep',
+  'hunt',
+  'glide',
+  'howl',
+  'jump',
+  'splash',
+  'sprint',
+  'wander',
+  'dream',
+  'shine',
+  'soar',
+  'stalk',
+  'pounce',
+  'swim',
+  'climb',
+  'bounce',
+  'chase',
+  'perch',
+  'nest',
+  'strike',
+  'purr',
+  'snarl',
+  'flutter',
+  'hover',
+  'scurry',
+  'prowl',
+  'chant',
+  'forge',
+  'spark',
+  'bloom',
+  'drift',
+  'breeze',
+  'surge',
+  'glow',
+];
+
+/**
+ * Normalizes a string into a URL/room-safe slug.
+ */
+export function sanitizeRoomPart(str: string): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Returns a random action from PREBAKED_ACTIONS.
+ */
+export function getRandomAction(): string {
+  return PREBAKED_ACTIONS[Math.floor(Math.random() * PREBAKED_ACTIONS.length)];
+}
+
+/**
+ * Generates a room name following the pattern: `<user-name>-<action>`.
+ * E.g. "montreal-lion-roar" or "scyan-dash".
+ * If userName is empty or invalid, falls back to "canvas-<action>".
+ */
+export function generateRoomName(userName?: string): string {
+  const cleanName = userName ? sanitizeRoomPart(userName) : '';
+  const action = getRandomAction();
+  if (!cleanName) {
+    return `canvas-${action}`;
+  }
+  return `${cleanName}-${action}`;
+}
+

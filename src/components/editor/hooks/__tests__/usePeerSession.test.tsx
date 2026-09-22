@@ -112,4 +112,36 @@ describe('usePeerSession hook', () => {
     // Verify broadcastSnapshot sends snapshot
     expect(sentActions.some((a) => a.type === 'snapshot')).toBe(true);
   });
+
+  it('exposes room snapshot storage and conflict resolution APIs', () => {
+    function TestComponent() {
+      const session = usePeerSession();
+      const summary = {
+        hasSaveRoom: typeof session.saveRoom === 'function',
+        hasRestoreRoom: typeof session.restoreRoom === 'function',
+        hasDeleteRoom: typeof session.deleteRoom === 'function',
+        hasEnsureActiveRoom: typeof session.ensureActiveRoom === 'function',
+        hasResolveDiscard: typeof session.resolveConflictDiscardLocalAndJoin === 'function',
+        hasResolveKeep: typeof session.resolveConflictKeepLocal === 'function',
+        isSavedRoomsArray: Array.isArray(session.savedRooms),
+        isConflictModalOpen: session.isConflictModalOpen,
+      };
+      return <div id="session-storage-summary" data-json={JSON.stringify(summary)} />;
+    }
+
+    const html = renderToString(<TestComponent />);
+    const match = html.match(/data-json="([^"]+)"/);
+    expect(match).not.toBeNull();
+
+    const summary = JSON.parse(match![1].replace(/&quot;/g, '"'));
+    expect(summary.hasSaveRoom).toBe(true);
+    expect(summary.hasRestoreRoom).toBe(true);
+    expect(summary.hasDeleteRoom).toBe(true);
+    expect(summary.hasEnsureActiveRoom).toBe(true);
+    expect(summary.hasResolveDiscard).toBe(true);
+    expect(summary.hasResolveKeep).toBe(true);
+    expect(summary.isSavedRoomsArray).toBe(true);
+    expect(summary.isConflictModalOpen).toBe(false);
+  });
 });
+

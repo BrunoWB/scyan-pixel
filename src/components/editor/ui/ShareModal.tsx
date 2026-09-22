@@ -9,6 +9,9 @@ import {
   RefreshCw,
   X,
   Palette,
+  History,
+  Trash2,
+  RotateCcw,
 } from 'lucide-react';
 import type { PeerProfile, ConnectedPeer } from '../../../core/peer/peerIdentity';
 import {
@@ -16,6 +19,7 @@ import {
   getPeerInitials,
   PEER_AVATAR_COLORS,
 } from '../../../core/peer/peerIdentity';
+import type { RoomMetadata } from '../../../core/peer/peerRoomStorage';
 import { PeerAvatar } from './PeerAvatar';
 
 export interface ShareModalProps {
@@ -27,9 +31,13 @@ export interface ShareModalProps {
   onRandomizeColor: () => void;
   onRandomizeProfile: () => void;
   roomId: string;
+  roomUuid?: string;
   shareUrl: string;
   onGenerateNewRoom: () => string;
   connectedPeers: ConnectedPeer[];
+  savedRooms?: RoomMetadata[];
+  onRestoreRoom?: (roomName: string) => void;
+  onDeleteRoom?: (roomName: string) => void;
 }
 
 export const ShareModal: React.FC<ShareModalProps> = ({
@@ -41,9 +49,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   onRandomizeColor,
   onRandomizeProfile,
   roomId,
+  roomUuid,
   shareUrl,
   onGenerateNewRoom,
   connectedPeers,
+  savedRooms = [],
+  onRestoreRoom,
+  onDeleteRoom,
 }) => {
   const [copied, setCopied] = useState(false);
   const [nameInput, setNameInput] = useState(profile.name);
@@ -142,7 +154,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 Canvas Collaboration & Share
               </h3>
               <p className="text-[11px] text-slate-400">
-                P2P serverless room • Room ID: <code className="text-cyan-300 font-mono">{roomId}</code>
+                P2P serverless room • Room: <code className="text-cyan-300 font-mono">{roomId}</code>
               </p>
             </div>
           </div>
@@ -294,7 +306,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </div>
           </div>
 
-          {/* SECTION 2: SHARE ROOM LINK */}
+          {/* SECTION 2: SHARE ROOM LINK & IDENTIFIERS */}
           <div className="bg-[#161a24] border border-[#262c3d] rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold tracking-wide text-slate-300 uppercase flex items-center gap-1.5">
@@ -305,7 +317,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 type="button"
                 onClick={onGenerateNewRoom}
                 className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-200 transition cursor-pointer"
-                title="Create a new room ID"
+                title="Create a new room"
               >
                 <RefreshCw className="w-3 h-3" />
                 New Room
@@ -332,6 +344,16 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 {copied ? 'Copied!' : 'Copy Link'}
               </button>
             </div>
+
+            {roomUuid && (
+              <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1 truncate">
+                <span>Unique Room UUID:</span>
+                <span className="text-slate-300 truncate" title={roomUuid}>
+                  {roomUuid}
+                </span>
+              </div>
+            )}
+
             <p className="text-[11px] text-slate-400 leading-relaxed">
               Anyone with this link will connect directly via WebRTC to draw collaboratively in real time.
             </p>
@@ -374,6 +396,89 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 <p className="text-[11px] text-slate-500 max-w-xs">
                   Copy and share your room link with teammates to start collaborating on this canvas.
                 </p>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION 4: LOCAL ROOM SNAPSHOTS & HISTORY */}
+          <div className="bg-[#161a24] border border-[#262c3d] rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold tracking-wide text-slate-300 uppercase flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5 text-cyan-400" />
+                Saved Rooms & Snapshots
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#1f2535] text-slate-300 border border-[#2e374d]">
+                {`${savedRooms.length} auto-saved`}
+              </span>
+            </div>
+
+            {savedRooms.length > 0 ? (
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {savedRooms.map((room) => {
+                  const isCurrent = room.roomName === roomId;
+                  const dateStr = new Date(room.updatedAt).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    month: 'short',
+                    day: 'numeric',
+                  });
+
+                  return (
+                    <div
+                      key={room.roomName}
+                      className={`flex items-center justify-between px-3 py-2 rounded-md border text-xs ${
+                        isCurrent
+                          ? 'bg-cyan-950/20 border-cyan-500/30'
+                          : 'bg-[#0f121a] border-[#22293a]'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 mr-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-medium text-slate-200 truncate">
+                            {room.roomName}
+                          </span>
+                          {isCurrent && (
+                            <span className="px-1.5 py-0.2 rounded-xs text-[9px] font-bold bg-cyan-500/20 text-cyan-300">
+                              Current
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {dateStr} • {room.width}×{room.height} • {room.pixelCount} px
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {!isCurrent && onRestoreRoom && (
+                          <button
+                            type="button"
+                            onClick={() => onRestoreRoom(room.roomName)}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-[#1f2535] hover:bg-cyan-500 hover:text-black text-slate-200 transition text-[11px] cursor-pointer"
+                            title="Load and switch to this room"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Load</span>
+                          </button>
+                        )}
+                        {onDeleteRoom && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteRoom(room.roomName)}
+                            className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                            title="Delete this snapshot"
+                            aria-label={`Delete ${room.roomName}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="py-4 px-3 text-center rounded-md bg-[#0f121a]/60 border border-dashed border-[#242b3d] text-[11px] text-slate-400">
+                No local snapshots saved yet. As soon as you draw, a local snapshot is auto-saved here.
               </div>
             )}
           </div>

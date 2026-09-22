@@ -11,16 +11,32 @@ export const SCYAN_PIXEL_APP_ID = 'scyan-pixel';
 
 export type RoomFactory = (config: { appId: string }, roomId: string) => Room;
 
+export interface RoomHandshakeMessage {
+  roomName: string;
+  roomUuid: string;
+  peerId: string;
+}
+
+export interface RoomConflictEvent {
+  roomName: string;
+  localUuid: string;
+  remoteUuid: string;
+  remotePeerId: string;
+}
+
 export interface PeerSessionCallbacks {
   onPeersChange?: (peers: ConnectedPeer[]) => void;
   onRemoteMutation?: (mutation: CanvasMutationMessage) => void;
   onRemoteSnapshot?: (snapshot: CanvasSnapshotMessage) => void;
   onGetSnapshot?: () => CanvasSnapshotMessage | null;
+  onRoomConflict?: (conflict: RoomConflictEvent) => void;
+  onAdoptRoomUuid?: (newUuid: string) => void;
 }
 
 export interface PeerSessionConfig {
   appId?: string;
   roomId: string;
+  roomUuid?: string;
   profile: PeerProfile;
   callbacks?: PeerSessionCallbacks;
   roomFactory?: RoomFactory;
@@ -85,14 +101,19 @@ function wrapAction<T>(rawAction: any): WrappedAction<T> {
 export class PeerSessionManager {
   readonly appId: string;
   private currentRoomId: string;
+  private currentRoomUuid: string;
   private profile: PeerProfile;
   private callbacks: PeerSessionCallbacks;
   private roomFactory: RoomFactory;
 
   private currentRoom: Room | null = null;
   private peersMap = new Map<string, ConnectedPeer>();
+  private verifiedPeers = new Set<string>();
+  private conflictedPeers = new Set<string>();
+  private pendingSnapshots = new Map<string, CanvasSnapshotMessage>();
 
   private profileAction: WrappedAction<PeerProfile> | null = null;
+  private roomInfoAction: WrappedAction<RoomHandshakeMessage> | null = null;
   private snapshotAction: WrappedAction<CanvasSnapshotMessage> | null = null;
   private snapshotRequestAction: WrappedAction<CanvasRequestSnapshotMessage> | null = null;
   private mutationAction: WrappedAction<CanvasMutationMessage> | null = null;
@@ -100,15 +121,22 @@ export class PeerSessionManager {
   constructor(config: PeerSessionConfig) {
     this.appId = config.appId || SCYAN_PIXEL_APP_ID;
     this.currentRoomId = config.roomId;
+    this.currentRoomUuid = config.roomUuid || '';
     this.profile = config.profile;
     this.callbacks = config.callbacks || {};
     this.roomFactory = config.roomFactory || defaultJoinRoom;
 
-    this.join(this.currentRoomId);
+    if (this.currentRoomId) {
+      this.join(this.currentRoomId);
+    }
   }
 
   get roomId(): string {
     return this.currentRoomId;
+  }
+
+  get roomUuid(): string {
+    return this.currentRoomUuid;
   }
 
   get connectedPeers(): ConnectedPeer[] {
@@ -124,13 +152,31 @@ export class PeerSessionManager {
     this.profileAction?.send(profile);
   }
 
-  changeRoom(newRoomId: string): void {
-    if (newRoomId === this.currentRoomId && this.currentRoom) {
+  updateRoomUuid(newUuid: string): void {
+    this.currentRoomUuid = newUuid;
+    if (newUuid && this.currentRoom) {
+      this.roomInfoAction?.send({
+        roomName: this.currentRoomId,
+        roomUuid: newUuid,
+        peerId: this.profile.id,
+      });
+    }
+  }
+
+  changeRoom(newRoomId: string, newRoomUuid?: string): void {
+    if (
+      newRoomId === this.currentRoomId &&
+      this.currentRoom &&
+      (!newRoomUuid || newRoomUuid === this.currentRoomUuid)
+    ) {
       return;
     }
     this.leaveCurrentRoom();
     this.currentRoomId = newRoomId;
-    this.join(newRoomId);
+    this.currentRoomUuid = newRoomUuid || '';
+    if (newRoomId) {
+      this.join(newRoomId);
+    }
   }
 
   broadcastMutation(mutation: CanvasMutationMessage): void {
@@ -159,12 +205,31 @@ export class PeerSessionManager {
     this.snapshotRequestAction?.send({ fromPeer: this.profile.id }, targetPeerId);
   }
 
+  resolveConflictAdopt(remoteUuid: string, remotePeerId: string): void {
+    this.currentRoomUuid = remoteUuid;
+    this.conflictedPeers.delete(remotePeerId);
+    this.verifiedPeers.add(remotePeerId);
+    if (this.currentRoom) {
+      this.roomInfoAction?.send(
+        {
+          roomName: this.currentRoomId,
+          roomUuid: remoteUuid,
+          peerId: this.profile.id,
+        },
+        remotePeerId
+      );
+      this.snapshotRequestAction?.send({ fromPeer: this.profile.id }, remotePeerId);
+    }
+  }
+
   destroy(): void {
     this.leaveCurrentRoom();
     this.callbacks = {};
   }
 
   private join(roomId: string): void {
+    if (!roomId) return;
+
     // Check if WebRTC is supported in the current environment
     const isWebRTCAvailable =
       typeof RTCPeerConnection !== 'undefined' || Boolean(this.roomFactory !== defaultJoinRoom);
@@ -180,6 +245,7 @@ export class PeerSessionManager {
 
       // Initialize typed actions
       this.profileAction = wrapAction<PeerProfile>(room.makeAction('profile'));
+      this.roomInfoAction = wrapAction<RoomHandshakeMessage>(room.makeAction('roomInfo'));
       this.snapshotAction = wrapAction<CanvasSnapshotMessage>(room.makeAction('snapshot'));
       this.snapshotRequestAction = wrapAction<CanvasRequestSnapshotMessage>(
         room.makeAction('snapshotRequest')
@@ -198,22 +264,32 @@ export class PeerSessionManager {
           this.notifyPeersChange();
         }
 
-        // Broadcast profile to the newly joined peer
+        // Broadcast profile and room info to the newly joined peer
         this.profileAction?.send(this.profile, peerId);
+        if (this.currentRoomUuid) {
+          this.roomInfoAction?.send(
+            {
+              roomName: this.currentRoomId,
+              roomUuid: this.currentRoomUuid,
+              peerId: this.profile.id,
+            },
+            peerId
+          );
+        }
 
         // Canvas State Synchronization
         const snapshot = this.callbacks.onGetSnapshot?.();
         if (snapshot && snapshot.pixels && snapshot.pixels.length > 0) {
-          // If we have canvas contents, send state to the new peer so they immediately see existing drawings
           this.snapshotAction?.send(snapshot, peerId);
         } else {
-          // If local canvas is empty, request snapshot from the peer
           this.snapshotRequestAction?.send({ fromPeer: this.profile.id }, peerId);
         }
       };
 
       // 2. Peer Presence: On Peer Leave
       room.onPeerLeave = (peerId: string) => {
+        this.verifiedPeers.delete(peerId);
+        this.conflictedPeers.delete(peerId);
         if (this.peersMap.has(peerId)) {
           this.peersMap.delete(peerId);
           this.notifyPeersChange();
@@ -232,23 +308,95 @@ export class PeerSessionManager {
         this.notifyPeersChange();
       });
 
-      // 4. Canvas Snapshot Request Listener
+      // 4. Room Info Action Listener (UUID Handshake & Conflict Detection)
+      this.roomInfoAction.onReceive((info: RoomHandshakeMessage, peerId: string) => {
+        if (!info) return;
+
+        // If local peer has no UUID yet, adopt remote peer's UUID
+        if (!this.currentRoomUuid) {
+          if (info.roomUuid) {
+            this.currentRoomUuid = info.roomUuid;
+            this.verifiedPeers.add(peerId);
+            this.conflictedPeers.delete(peerId);
+            this.callbacks.onAdoptRoomUuid?.(info.roomUuid);
+            // Respond with adopted UUID so the other peer knows we verified
+            this.roomInfoAction?.send(
+              {
+                roomName: this.currentRoomId,
+                roomUuid: info.roomUuid,
+                peerId: this.profile.id,
+              },
+              peerId
+            );
+            // Request snapshot from peer since we just adopted their room
+            this.snapshotRequestAction?.send({ fromPeer: this.profile.id }, peerId);
+          }
+          return;
+        }
+
+        // Local peer has UUID, but remote peer has empty UUID (they just joined and are waiting to adopt)
+        if (!info.roomUuid) {
+          this.roomInfoAction?.send(
+            {
+              roomName: this.currentRoomId,
+              roomUuid: this.currentRoomUuid,
+              peerId: this.profile.id,
+            },
+            peerId
+          );
+          return;
+        }
+
+        // Both peers have a UUID
+        if (info.roomUuid === this.currentRoomUuid) {
+          this.verifiedPeers.add(peerId);
+          this.conflictedPeers.delete(peerId);
+
+          // Flush any snapshot that arrived while waiting for handshake
+          const pending = this.pendingSnapshots.get(peerId);
+          if (pending) {
+            this.pendingSnapshots.delete(peerId);
+            this.callbacks.onRemoteSnapshot?.(pending);
+          }
+        } else {
+          // UUID Mismatch: Two distinct rooms with same room name!
+          this.conflictedPeers.add(peerId);
+          this.verifiedPeers.delete(peerId);
+          this.pendingSnapshots.delete(peerId);
+          this.callbacks.onRoomConflict?.({
+            roomName: this.currentRoomId,
+            localUuid: this.currentRoomUuid,
+            remoteUuid: info.roomUuid,
+            remotePeerId: peerId,
+          });
+        }
+      });
+
+      // 5. Canvas Snapshot Request Listener
       this.snapshotRequestAction.onReceive((_req: CanvasRequestSnapshotMessage, peerId: string) => {
+        if (this.conflictedPeers.has(peerId)) return;
         const snapshot = this.callbacks.onGetSnapshot?.();
         if (snapshot && snapshot.pixels && snapshot.pixels.length > 0) {
           this.snapshotAction?.send(snapshot, peerId);
         }
       });
 
-      // 5. Canvas Snapshot Response Listener
-      this.snapshotAction.onReceive((snapshot: CanvasSnapshotMessage, _peerId: string) => {
+      // 6. Canvas Snapshot Response Listener
+      this.snapshotAction.onReceive((snapshot: CanvasSnapshotMessage, peerId: string) => {
+        if (this.conflictedPeers.has(peerId)) return;
+        if (this.currentRoomUuid && !this.verifiedPeers.has(peerId)) {
+          this.pendingSnapshots.set(peerId, snapshot);
+          return;
+        }
         if (snapshot && Array.isArray(snapshot.pixels)) {
           this.callbacks.onRemoteSnapshot?.(snapshot);
         }
       });
 
-      // 6. Canvas Delta Mutation Listener
-      this.mutationAction.onReceive((mutation: CanvasMutationMessage, _peerId: string) => {
+      // 7. Canvas Delta Mutation Listener
+      this.mutationAction.onReceive((mutation: CanvasMutationMessage, peerId: string) => {
+        if (this.conflictedPeers.has(peerId)) return;
+        if (this.currentRoomUuid && !this.verifiedPeers.has(peerId)) return;
         if (mutation) {
           this.callbacks.onRemoteMutation?.(mutation);
         }
@@ -270,8 +418,12 @@ export class PeerSessionManager {
       this.currentRoom = null;
     }
     this.peersMap.clear();
+    this.verifiedPeers.clear();
+    this.conflictedPeers.clear();
+    this.pendingSnapshots.clear();
     this.notifyPeersChange();
     this.profileAction = null;
+    this.roomInfoAction = null;
     this.snapshotAction = null;
     this.snapshotRequestAction = null;
     this.mutationAction = null;
