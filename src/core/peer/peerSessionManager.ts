@@ -164,11 +164,10 @@ export class PeerSessionManager {
   }
 
   changeRoom(newRoomId: string, newRoomUuid?: string): void {
-    if (
-      newRoomId === this.currentRoomId &&
-      this.currentRoom &&
-      (!newRoomUuid || newRoomUuid === this.currentRoomUuid)
-    ) {
+    if (newRoomId === this.currentRoomId && this.currentRoom) {
+      if (newRoomUuid && newRoomUuid !== this.currentRoomUuid) {
+        this.updateRoomUuid(newRoomUuid);
+      }
       return;
     }
     this.leaveCurrentRoom();

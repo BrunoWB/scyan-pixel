@@ -153,4 +153,128 @@ describe('EditorStatusBar', () => {
     expect(html).toContain('Selection:');
     expect(html).toContain('14×20');
   });
+
+  it('renders solo mode when isRoomActive is false or omitted', () => {
+    const grid = new PixelGrid(32, 32);
+
+    const html = renderToString(
+      <EditorStatusBar
+        hoverPos={null}
+        grid={grid}
+        selection={null}
+        zoom={16}
+        isRoomActive={false}
+      />
+    );
+
+    expect(html).toContain('solo mode');
+    expect(html).toContain('data-slot="p2p-status"');
+  });
+
+  it('renders waiting for peers status when room is active with 0 peers', () => {
+    const grid = new PixelGrid(32, 32);
+
+    const html = renderToString(
+      <EditorStatusBar
+        hoverPos={null}
+        grid={grid}
+        selection={null}
+        zoom={16}
+        isRoomActive={true}
+        roomId="montreal-lion-roar"
+        peerCount={0}
+      />
+    );
+
+    expect(html).toContain('waiting for peers');
+    expect(html).toContain('(montreal-lion-roar)');
+    expect(html).toContain('bg-cyan-400/90');
+  });
+
+  it('renders connected peer count when room is active with peers', () => {
+    const grid = new PixelGrid(32, 32);
+
+    const html = renderToString(
+      <EditorStatusBar
+        hoverPos={null}
+        grid={grid}
+        selection={null}
+        zoom={16}
+        isRoomActive={true}
+        roomId="montreal-lion-roar"
+        peerCount={2}
+      />
+    );
+
+    expect(html).toContain('2 peers');
+    expect(html).toContain('(montreal-lion-roar)');
+    expect(html).toContain('bg-emerald-400');
+  });
+
+  it('renders status history popover with timestamps when opened', () => {
+    const grid = new PixelGrid(32, 32);
+    const testEvents = [
+      {
+        id: 'evt-1',
+        timestamp: 1727042000000,
+        type: 'peer_join' as const,
+        message: 'Falcon connected',
+      },
+      {
+        id: 'evt-2',
+        timestamp: 1727042015000,
+        type: 'sync' as const,
+        message: 'Synchronized canvas snapshot with 16 pixels',
+      },
+      {
+        id: 'evt-3',
+        timestamp: 1727042030000,
+        type: 'save' as const,
+        message: 'Autosaved "montreal-lion-roar" to IndexedDB (16 px)',
+      },
+    ];
+
+    const html = renderToString(
+      <EditorStatusBar
+        hoverPos={null}
+        grid={grid}
+        selection={null}
+        zoom={16}
+        isRoomActive={true}
+        roomId="montreal-lion-roar"
+        peerCount={1}
+        statusEvents={testEvents}
+        defaultHistoryOpen={true}
+        onClearStatusEvents={vi.fn()}
+        onOpenInvite={vi.fn()}
+      />
+    );
+
+    expect(html).toContain('data-slot="p2p-status-history"');
+    expect(html).toContain('P2P Status &amp; Activity Log');
+    expect(html).toContain('Falcon connected');
+    expect(html).toContain('Synchronized canvas snapshot with 16 pixels');
+    expect(html).toContain('Autosaved &quot;montreal-lion-roar&quot; to IndexedDB (16 px)');
+    expect(html).toContain('Invite');
+  });
+
+  it('renders empty history message when no events are recorded', () => {
+    const grid = new PixelGrid(32, 32);
+
+    const html = renderToString(
+      <EditorStatusBar
+        hoverPos={null}
+        grid={grid}
+        selection={null}
+        zoom={16}
+        isRoomActive={true}
+        roomId="montreal-lion-roar"
+        statusEvents={[]}
+        defaultHistoryOpen={true}
+      />
+    );
+
+    expect(html).toContain('data-slot="p2p-status-history"');
+    expect(html).toContain('No status events recorded yet');
+  });
 });

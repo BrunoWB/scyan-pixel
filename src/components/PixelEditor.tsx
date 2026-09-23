@@ -1550,6 +1550,12 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         zoom={zoom}
         onZoomChange={zoomTo}
         onFitToScreen={handleFitToScreen}
+        isRoomActive={peerSession.isRoomActiveInUrl}
+        roomId={peerSession.roomId}
+        peerCount={peerSession.connectedPeers.length}
+        statusEvents={peerSession.statusEvents}
+        onClearStatusEvents={peerSession.clearStatusEvents}
+        onOpenInvite={peerSession.openShareModal}
       />
 
       {/* Image & GIF Import Modal */}
