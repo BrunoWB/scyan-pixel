@@ -68,3 +68,4 @@ describe('RoomJoiningOverlay', () => {
     expect(html).toContain('New Canvas');
   });
 });
+

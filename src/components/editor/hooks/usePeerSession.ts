@@ -74,7 +74,7 @@ export interface UsePeerSessionReturn {
   statusEvents: PeerStatusEvent[];
   clearStatusEvents: () => void;
   setRoomId: (newRoomId: string, newRoomUuid?: string) => void;
-  generateNewRoom: (activateInUrl?: boolean) => string;
+  generateNewRoom: () => string;
   ensureActiveRoom: (grid?: PixelGrid) => string;
   getShareUrl: () => string;
   isShareModalOpen: boolean;
@@ -111,21 +111,25 @@ export interface UsePeerSessionReturn {
   broadcastSnapshot: (snapshot: CanvasSnapshotMessage) => void;
 }
 
+function getInitialRoomIdFromUrl(): string | null {
+  if (typeof window === 'undefined' || !window.location?.hash) {
+    return null;
+  }
+  return window.location.hash.match(/#room=([a-zA-Z0-9_-]+)/)?.[1] ?? null;
+}
+
 export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionReturn {
   const [profile, setProfile] = useState<PeerProfile>(() => loadStoredPeerProfile());
   const [connectedPeers, setConnectedPeers] = useState<ConnectedPeer[]>([]);
 
-  // Check URL hash for pre-existing room
-  const initialUrlMatch =
-    typeof window !== 'undefined' && window.location?.hash
-      ? window.location.hash.match(/#room=([a-zA-Z0-9_-]+)/)
-      : null;
+  // Check URL hash for pre-existing room once on mount
+  const [initialRoomId] = useState<string | null>(getInitialRoomIdFromUrl);
 
-  const [isRoomActiveInUrl, setIsRoomActiveInUrl] = useState<boolean>(Boolean(initialUrlMatch?.[1]));
+  const [isRoomActiveInUrl, setIsRoomActiveInUrl] = useState<boolean>(Boolean(initialRoomId));
 
   const [roomId, setRoomIdState] = useState<string>(() => {
-    if (initialUrlMatch?.[1]) {
-      return initialUrlMatch[1];
+    if (initialRoomId) {
+      return initialRoomId;
     }
     return generateRoomName(profile.name);
   });
@@ -146,7 +150,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   }, [roomUuid]);
 
   const [roomJoinStatus, setRoomJoinStatus] = useState<RoomJoinStatus>(() =>
-    initialUrlMatch?.[1] ? 'checking_local' : 'idle'
+    initialRoomId ? 'checking_local' : 'idle'
   );
 
   const joinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -179,9 +183,8 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
   useEffect(() => {
     let isMounted = true;
-    if (initialUrlMatch?.[1]) {
-      const targetRoom = initialUrlMatch[1];
-      void loadRoomSnapshot(targetRoom).then((saved) => {
+    if (initialRoomId) {
+      void loadRoomSnapshot(initialRoomId).then((saved) => {
         if (!isMounted) return;
         if (saved) {
           if (saved.roomUuid) {
@@ -204,15 +207,15 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       isMounted = false;
       clearJoinTimeout();
     };
-  }, [initialUrlMatch, startJoinTimeout, clearJoinTimeout]);
+  }, [initialRoomId, startJoinTimeout, clearJoinTimeout]);
 
   const [statusEvents, setStatusEvents] = useState<PeerStatusEvent[]>(() => [
     {
       id: `init-${Date.now()}`,
       timestamp: Date.now(),
       type: 'info',
-      message: initialUrlMatch?.[1]
-        ? `Joined room "${initialUrlMatch[1]}" from URL`
+      message: initialRoomId
+        ? `Joined room "${initialRoomId}" from URL`
         : 'Session ready in solo mode',
     },
   ]);
@@ -527,6 +530,8 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     const fallbackUuid =
       typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
     const uuid = newRoomUuid || fallbackUuid;
+    clearJoinTimeout();
+    setRoomJoinStatus('connected');
     roomIdRef.current = newRoomId;
     roomUuidRef.current = uuid;
     setRoomIdState(newRoomId);
@@ -546,45 +551,17 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         }
       });
     }
-  }, [addStatusEvent]);
+  }, [addStatusEvent, clearJoinTimeout]);
 
-  const generateNewRoom = useCallback(
-    (activateInUrl: boolean = false): string => {
-      clearJoinTimeout();
-      setRoomJoinStatus('idle');
-      const newRoomName = generateRoomName(profile.name);
-      const newUuid =
-        typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
-
-      roomIdRef.current = newRoomName;
-      roomUuidRef.current = newUuid;
-      setRoomIdState(newRoomName);
-      setRoomUuidState(newUuid);
-
-      if (activateInUrl) {
-        setIsRoomActiveInUrl(true);
-        if (typeof window !== 'undefined') {
-          window.location.hash = `room=${newRoomName}`;
-        }
-        addStatusEvent('info', `Active room set to "${newRoomName}"`);
-      } else {
-        setIsRoomActiveInUrl(false);
-        if (typeof window !== 'undefined') {
-          if (window.location.hash) {
-            try {
-              window.history.replaceState(null, '', window.location.pathname + window.location.search);
-            } catch {
-              window.location.hash = '';
-            }
-          }
-        }
-        addStatusEvent('info', 'Started new canvas in solo mode');
-      }
-
-      return newRoomName;
-    },
-    [profile.name, clearJoinTimeout, addStatusEvent]
-  );
+  const generateNewRoom = useCallback(() => {
+    clearJoinTimeout();
+    setRoomJoinStatus('connected');
+    const newRoomName = generateRoomName(profile.name);
+    const newUuid =
+      typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
+    setRoomId(newRoomName, newUuid);
+    return newRoomName;
+  }, [profile.name, setRoomId, clearJoinTimeout]);
 
   const getShareUrl = useCallback(() => {
     if (typeof window === 'undefined') return '';
@@ -718,13 +695,16 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
   const cancelJoinRoom = useCallback(() => {
     clearJoinTimeout();
-    setRoomJoinStatus('idle');
-    const newRoomName = generateNewRoom(false);
+    setRoomJoinStatus('connected');
+    const newRoomName = generateNewRoom();
+    addStatusEvent('info', `Cancelled joining room. Created fresh room "${newRoomName}"`);
     return newRoomName;
-  }, [clearJoinTimeout, generateNewRoom]);
+  }, [clearJoinTimeout, generateNewRoom, addStatusEvent]);
 
   const copyRoomToNewSave = useCallback(
     async (sourceRoomName: string): Promise<RoomSnapshotData | null> => {
+      clearJoinTimeout();
+      setRoomJoinStatus('connected');
       const newSnapshot = await forkRoomSnapshot(sourceRoomName, profile.name);
       if (!newSnapshot) return null;
 
@@ -744,7 +724,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       options?.onRestoreSnapshot?.(newSnapshot);
       return newSnapshot;
     },
-    [profile.name, options]
+    [profile.name, options, clearJoinTimeout]
   );
 
   const deleteRoom = useCallback(async (targetRoomName: string) => {

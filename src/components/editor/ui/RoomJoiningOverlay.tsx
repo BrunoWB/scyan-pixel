@@ -118,3 +118,4 @@ export const RoomJoiningOverlay: React.FC<RoomJoiningOverlayProps> = ({
     </div>
   );
 };
+
