@@ -375,7 +375,7 @@ describe('usePeerSession hook', () => {
     expect(session.roomJoinStatus).toBe('checking_local');
   });
 
-  it('cancelJoinRoom generates a new room and updates hash', () => {
+  it('cancelJoinRoom generates a new room in solo mode and clears hash', () => {
     (window.location as unknown as { hash: string }).hash = '#room=remote-room-to-cancel';
 
     const holder: { session?: ReturnType<typeof usePeerSession> } = {};
@@ -392,7 +392,28 @@ describe('usePeerSession hook', () => {
     const newRoom = session.cancelJoinRoom();
     expect(newRoom).toBeTruthy();
     expect(newRoom).not.toBe('remote-room-to-cancel');
-    expect(window.location.hash).toContain(newRoom);
+    expect(window.location.hash).toBe('');
+  });
+
+  it('generateNewRoom defaults to solo mode without activating in URL', () => {
+    const holder: { session?: ReturnType<typeof usePeerSession> } = {};
+    // oxlint-disable-next-line react/immutability, react/globals
+    function TestComponent() {
+      // oxlint-disable-next-line react/immutability, react/globals
+      holder.session = usePeerSession();
+      return <div>new-room-test</div>;
+    }
+
+    renderToString(<TestComponent />);
+    const session = holder.session!;
+
+    const freshRoom = session.generateNewRoom();
+    expect(freshRoom).toBeTruthy();
+    expect(window.location.hash).toBe('');
+
+    const activeRoom = session.generateNewRoom(true);
+    expect(activeRoom).toBeTruthy();
+    expect(window.location.hash).toContain(activeRoom);
   });
 });
 

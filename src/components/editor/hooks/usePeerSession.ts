@@ -74,7 +74,7 @@ export interface UsePeerSessionReturn {
   statusEvents: PeerStatusEvent[];
   clearStatusEvents: () => void;
   setRoomId: (newRoomId: string, newRoomUuid?: string) => void;
-  generateNewRoom: () => string;
+  generateNewRoom: (activateInUrl?: boolean) => string;
   ensureActiveRoom: (grid?: PixelGrid) => string;
   getShareUrl: () => string;
   isShareModalOpen: boolean;
@@ -548,15 +548,43 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     }
   }, [addStatusEvent]);
 
-  const generateNewRoom = useCallback(() => {
-    clearJoinTimeout();
-    setRoomJoinStatus('idle');
-    const newRoomName = generateRoomName(profile.name);
-    const newUuid =
-      typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
-    setRoomId(newRoomName, newUuid);
-    return newRoomName;
-  }, [profile.name, setRoomId, clearJoinTimeout]);
+  const generateNewRoom = useCallback(
+    (activateInUrl: boolean = false): string => {
+      clearJoinTimeout();
+      setRoomJoinStatus('idle');
+      const newRoomName = generateRoomName(profile.name);
+      const newUuid =
+        typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
+
+      roomIdRef.current = newRoomName;
+      roomUuidRef.current = newUuid;
+      setRoomIdState(newRoomName);
+      setRoomUuidState(newUuid);
+
+      if (activateInUrl) {
+        setIsRoomActiveInUrl(true);
+        if (typeof window !== 'undefined') {
+          window.location.hash = `room=${newRoomName}`;
+        }
+        addStatusEvent('info', `Active room set to "${newRoomName}"`);
+      } else {
+        setIsRoomActiveInUrl(false);
+        if (typeof window !== 'undefined') {
+          if (window.location.hash) {
+            try {
+              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            } catch {
+              window.location.hash = '';
+            }
+          }
+        }
+        addStatusEvent('info', 'Started new canvas in solo mode');
+      }
+
+      return newRoomName;
+    },
+    [profile.name, clearJoinTimeout, addStatusEvent]
+  );
 
   const getShareUrl = useCallback(() => {
     if (typeof window === 'undefined') return '';
@@ -691,10 +719,9 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   const cancelJoinRoom = useCallback(() => {
     clearJoinTimeout();
     setRoomJoinStatus('idle');
-    const newRoomName = generateNewRoom();
-    addStatusEvent('info', `Cancelled joining room. Created fresh room "${newRoomName}"`);
+    const newRoomName = generateNewRoom(false);
     return newRoomName;
-  }, [clearJoinTimeout, generateNewRoom, addStatusEvent]);
+  }, [clearJoinTimeout, generateNewRoom]);
 
   const copyRoomToNewSave = useCallback(
     async (sourceRoomName: string): Promise<RoomSnapshotData | null> => {

@@ -497,9 +497,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     }
     fitToView(blankGrid);
 
-    // 3. Generate a new room with a new name (<user-name>-<action>) and new roomUuid
-    // We defer saving the room snapshot until something is actually drawn or modified in it.
-    peerSession.generateNewRoom();
+    // 3. Generate a new room with a new name (<user-name>-<action>) and new roomUuid in solo mode (do not connect)
+    peerSession.generateNewRoom(false);
   }, [activeDrawColor, peerSession, resetGrid, fitToView, setGhost, setSelection, setFloatingPixels]);
 
   const handleLoadRoom = useCallback(
@@ -1646,7 +1645,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         roomId={peerSession.roomId}
         roomUuid={peerSession.roomUuid}
         shareUrl={peerSession.getShareUrl()}
-        onGenerateNewRoom={peerSession.generateNewRoom}
+        onGenerateNewRoom={() => peerSession.generateNewRoom(true)}
         connectedPeers={peerSession.connectedPeers}
         savedRooms={peerSession.savedRooms}
         onRestoreRoom={handleLoadRoom}
