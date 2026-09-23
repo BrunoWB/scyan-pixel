@@ -41,6 +41,7 @@ import { ExportModal } from './editor/ui/ExportModal';
 import { ShareModal } from './editor/ui/ShareModal';
 import { RoomConflictModal } from './editor/ui/RoomConflictModal';
 import { RoomStorageModal } from './editor/ui/RoomStorageModal';
+import { RoomJoiningOverlay } from './editor/ui/RoomJoiningOverlay';
 import {
   diffGridPixels,
   applyPixelDeltas,
@@ -646,7 +647,15 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (modalContent || isImportModalOpen || peerSession.isShareModalOpen || peerSession.isLoadModalOpen) return;
+      if (
+        modalContent ||
+        isImportModalOpen ||
+        peerSession.isShareModalOpen ||
+        peerSession.isLoadModalOpen ||
+        peerSession.roomJoinStatus === 'connecting' ||
+        peerSession.roomJoinStatus === 'timed_out'
+      )
+        return;
 
       if (e.key === 'Escape') {
         if (ghostPlacementRef.current) {
@@ -875,6 +884,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     pan,
     zoom,
     setSelection,
+    peerSession.roomJoinStatus,
   ]);
 
   // Transformations
@@ -885,6 +895,9 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
   // Pointer Interaction Handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (peerSession.roomJoinStatus === 'connecting' || peerSession.roomJoinStatus === 'timed_out') {
+      return;
+    }
     if (ghostPlacementRef.current) {
       if (e.button === 0) {
         const gp = ghostPlacementRef.current;
@@ -1539,6 +1552,15 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
             setGhost(null);
           }}
           onWheel={handleWheel}
+        />
+
+        {/* Room Joining Gate Overlay (blocks canvas when joining unconfirmed rooms) */}
+        <RoomJoiningOverlay
+          status={peerSession.roomJoinStatus}
+          roomName={peerSession.roomId}
+          onRetry={peerSession.retryJoinRoom}
+          onNewCanvas={handleNewCanvas}
+          accentColor={activePixelColor}
         />
       </div>
 

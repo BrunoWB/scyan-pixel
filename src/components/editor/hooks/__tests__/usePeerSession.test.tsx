@@ -339,6 +339,62 @@ describe('usePeerSession hook', () => {
     // Active room remains unsaved
     expect(await loadRoomSnapshot(activeRoom)).toBeNull();
   });
+
+  it('tracks roomJoinStatus as idle in solo mode and exposes retry/cancel methods', () => {
+    const holder: { session?: ReturnType<typeof usePeerSession> } = {};
+    // oxlint-disable-next-line react/immutability, react/globals
+    function TestComponent() {
+      // oxlint-disable-next-line react/immutability, react/globals
+      holder.session = usePeerSession();
+      return <div>join-status-test</div>;
+    }
+
+    renderToString(<TestComponent />);
+    const session = holder.session!;
+
+    expect(session.roomJoinStatus).toBe('idle');
+    expect(typeof session.retryJoinRoom).toBe('function');
+    expect(typeof session.cancelJoinRoom).toBe('function');
+  });
+
+  it('initializes roomJoinStatus as checking_local when URL hash contains room', () => {
+    (window.location as unknown as { hash: string }).hash = '#room=remote-shared-room';
+
+    const holder: { session?: ReturnType<typeof usePeerSession> } = {};
+    // oxlint-disable-next-line react/immutability, react/globals
+    function TestComponent() {
+      // oxlint-disable-next-line react/immutability, react/globals
+      holder.session = usePeerSession();
+      return <div>remote-join-test</div>;
+    }
+
+    renderToString(<TestComponent />);
+    const session = holder.session!;
+
+    expect(session.roomId).toBe('remote-shared-room');
+    expect(session.roomJoinStatus).toBe('checking_local');
+  });
+
+  it('cancelJoinRoom generates a new room and updates hash', () => {
+    (window.location as unknown as { hash: string }).hash = '#room=remote-room-to-cancel';
+
+    const holder: { session?: ReturnType<typeof usePeerSession> } = {};
+    // oxlint-disable-next-line react/immutability, react/globals
+    function TestComponent() {
+      // oxlint-disable-next-line react/immutability, react/globals
+      holder.session = usePeerSession();
+      return <div>cancel-join-test</div>;
+    }
+
+    renderToString(<TestComponent />);
+    const session = holder.session!;
+
+    const newRoom = session.cancelJoinRoom();
+    expect(newRoom).toBeTruthy();
+    expect(newRoom).not.toBe('remote-room-to-cancel');
+    expect(window.location.hash).toContain(newRoom);
+  });
 });
+
 
 

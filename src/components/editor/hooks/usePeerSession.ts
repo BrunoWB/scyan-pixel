@@ -34,6 +34,8 @@ import {
 } from '../../../core/peer/peerRoomStorage';
 import type { PixelGrid } from '../../../core/PixelGrid';
 
+export type RoomJoinStatus = 'idle' | 'checking_local' | 'connecting' | 'connected' | 'timed_out';
+
 export interface UsePeerSessionOptions {
   onRemoteMutation?: (mutation: CanvasMutationMessage) => void;
   onRemoteSnapshot?: (snapshot: CanvasSnapshotMessage) => void;
@@ -43,6 +45,7 @@ export interface UsePeerSessionOptions {
   getCurrentGrid?: () => PixelGrid;
   getCurrentTimestamps?: () => PixelTimestampTracker;
   roomFactory?: RoomFactory;
+  joinTimeoutMs?: number;
 }
 
 export interface PeerStatusEvent {
@@ -65,6 +68,9 @@ export interface UsePeerSessionReturn {
   roomId: string;
   roomUuid: string;
   isRoomActiveInUrl: boolean;
+  roomJoinStatus: RoomJoinStatus;
+  retryJoinRoom: () => void;
+  cancelJoinRoom: () => string;
   statusEvents: PeerStatusEvent[];
   clearStatusEvents: () => void;
   setRoomId: (newRoomId: string, newRoomUuid?: string) => void;
@@ -139,6 +145,34 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     }
   }, [roomUuid]);
 
+  const [roomJoinStatus, setRoomJoinStatus] = useState<RoomJoinStatus>(() =>
+    initialUrlMatch?.[1] ? 'checking_local' : 'idle'
+  );
+
+  const joinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearJoinTimeout = useCallback(() => {
+    if (joinTimeoutRef.current) {
+      clearTimeout(joinTimeoutRef.current);
+      // oxlint-disable-next-line react/immutability
+      joinTimeoutRef.current = null;
+    }
+  }, []);
+
+  const optJoinTimeoutMs = options?.joinTimeoutMs;
+  const startJoinTimeout = useCallback(() => {
+    clearJoinTimeout();
+    // oxlint-disable-next-line react/immutability
+    joinTimeoutRef.current = setTimeout(() => {
+      setRoomJoinStatus((current) => {
+        if (current === 'connecting') {
+          return 'timed_out';
+        }
+        return current;
+      });
+    }, optJoinTimeoutMs ?? 15000);
+  }, [clearJoinTimeout, optJoinTimeoutMs]);
+
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isLoadModalOpen, setIsLoadModalOpen] = useState<boolean>(false);
   const [savedRooms, setSavedRooms] = useState<RoomMetadata[]>([]);
@@ -146,10 +180,18 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   useEffect(() => {
     let isMounted = true;
     if (initialUrlMatch?.[1]) {
-      void getStoredRoomUuid(initialUrlMatch[1]).then((uuid) => {
-        if (isMounted && uuid) {
-          roomUuidRef.current = uuid;
-          setRoomUuidState(uuid);
+      const targetRoom = initialUrlMatch[1];
+      void loadRoomSnapshot(targetRoom).then((saved) => {
+        if (!isMounted) return;
+        if (saved) {
+          if (saved.roomUuid) {
+            roomUuidRef.current = saved.roomUuid;
+            setRoomUuidState(saved.roomUuid);
+          }
+          setRoomJoinStatus('connected');
+        } else {
+          setRoomJoinStatus('connecting');
+          startJoinTimeout();
         }
       });
     }
@@ -160,8 +202,9 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     });
     return () => {
       isMounted = false;
+      clearJoinTimeout();
     };
-  }, [initialUrlMatch]);
+  }, [initialUrlMatch, startJoinTimeout, clearJoinTimeout]);
 
   const [statusEvents, setStatusEvents] = useState<PeerStatusEvent[]>(() => [
     {
@@ -215,10 +258,17 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         }
       }
 
+      if (peers.length > 0) {
+        clearJoinTimeout();
+        setRoomJoinStatus((current) =>
+          current === 'connecting' || current === 'timed_out' ? 'connected' : current
+        );
+      }
+
       prevPeersRef.current = peers;
       setConnectedPeers(peers);
     },
-    [addStatusEvent]
+    [addStatusEvent, clearJoinTimeout]
   );
 
   const sessionManagerRef = useRef<PeerSessionManager | null>(null);
@@ -233,6 +283,10 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       options?.onRemoteMutation?.(mutation);
     },
     onRemoteSnapshot: (snapshot) => {
+      clearJoinTimeout();
+      setRoomJoinStatus((current) =>
+        current === 'connecting' || current === 'timed_out' ? 'connected' : current
+      );
       addStatusEvent('sync', `Synchronized canvas snapshot with ${snapshot.pixels?.length || 0} pixels`);
       options?.onRemoteSnapshot?.(snapshot);
     },
@@ -243,6 +297,10 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       setIsConflictModalOpen(true);
     },
     onAdoptRoomUuid: (newUuid) => {
+      clearJoinTimeout();
+      setRoomJoinStatus((current) =>
+        current === 'connecting' || current === 'timed_out' ? 'connected' : current
+      );
       addStatusEvent('conflict', `Adopted remote room UUID (${newUuid.slice(0, 8)})`);
       roomUuidRef.current = newUuid;
       setRoomUuidState(newUuid);
@@ -269,6 +327,10 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         optOnRemoteMutation?.(mutation);
       },
       onRemoteSnapshot: (snapshot) => {
+        clearJoinTimeout();
+        setRoomJoinStatus((current) =>
+          current === 'connecting' || current === 'timed_out' ? 'connected' : current
+        );
         addStatusEvent('sync', `Synchronized canvas snapshot with ${snapshot.pixels?.length || 0} pixels`);
         optOnRemoteSnapshot?.(snapshot);
       },
@@ -279,6 +341,10 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         setIsConflictModalOpen(true);
       },
       onAdoptRoomUuid: (newUuid) => {
+        clearJoinTimeout();
+        setRoomJoinStatus((current) =>
+          current === 'connecting' || current === 'timed_out' ? 'connected' : current
+        );
         addStatusEvent('conflict', `Adopted remote room UUID (${newUuid.slice(0, 8)})`);
         roomUuidRef.current = newUuid;
         setRoomUuidState(newUuid);
@@ -288,7 +354,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       },
     };
     sessionManagerRef.current?.setCallbacks(callbacksRef.current);
-  }, [optOnRemoteMutation, optOnRemoteSnapshot, optOnGetSnapshot, handlePeersChange, addStatusEvent]);
+  }, [optOnRemoteMutation, optOnRemoteSnapshot, optOnGetSnapshot, handlePeersChange, addStatusEvent, clearJoinTimeout]);
 
   // Handle external hash changes (e.g. user back/forward in browser history)
   useEffect(() => {
@@ -301,26 +367,38 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         if (newName === roomIdRef.current) {
           return;
         }
+        clearJoinTimeout();
         roomIdRef.current = newName;
         setRoomIdState(newName);
         setIsRoomActiveInUrl(true);
-        void getStoredRoomUuid(newName).then((storedUuid) => {
+        setRoomJoinStatus('checking_local');
+        void loadRoomSnapshot(newName).then((saved) => {
           if (roomIdRef.current === newName) {
-            const effectiveUuid = storedUuid || '';
-            roomUuidRef.current = effectiveUuid;
-            setRoomUuidState(effectiveUuid);
+            if (saved) {
+              const effectiveUuid = saved.roomUuid || '';
+              roomUuidRef.current = effectiveUuid;
+              setRoomUuidState(effectiveUuid);
+              setRoomJoinStatus('connected');
+            } else {
+              roomUuidRef.current = '';
+              setRoomUuidState('');
+              setRoomJoinStatus('connecting');
+              startJoinTimeout();
+            }
           }
         });
       } else {
+        clearJoinTimeout();
         setIsRoomActiveInUrl(false);
         roomUuidRef.current = '';
         setRoomUuidState('');
+        setRoomJoinStatus('idle');
       }
     };
 
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [clearJoinTimeout, startJoinTimeout]);
 
   const profileRef = useRef(profile);
   useEffect(() => {
@@ -383,6 +461,9 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
   const ensureActiveRoom = useCallback(
     (_grid?: PixelGrid): string => {
+      if (roomJoinStatus === 'connecting' || roomJoinStatus === 'timed_out') {
+        return roomIdRef.current || roomId;
+      }
       const activeName = roomIdRef.current || roomId || generateRoomName(profile.name);
       const activeUuid =
         roomUuidRef.current ||
@@ -403,7 +484,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
       return activeName;
     },
-    [isRoomActiveInUrl, roomId, roomUuid, profile.name]
+    [roomJoinStatus, isRoomActiveInUrl, roomId, roomUuid, profile.name]
   );
 
   const updateProfile = useCallback(
@@ -468,12 +549,14 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   }, [addStatusEvent]);
 
   const generateNewRoom = useCallback(() => {
+    clearJoinTimeout();
+    setRoomJoinStatus('idle');
     const newRoomName = generateRoomName(profile.name);
     const newUuid =
       typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
     setRoomId(newRoomName, newUuid);
     return newRoomName;
-  }, [profile.name, setRoomId]);
+  }, [profile.name, setRoomId, clearJoinTimeout]);
 
   const getShareUrl = useCallback(() => {
     if (typeof window === 'undefined') return '';
@@ -504,6 +587,11 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       targetRoomName?: string,
       targetRoomUuid?: string
     ): Promise<void> => {
+      // Do not auto-save unconfirmed remote room before connecting!
+      if (roomJoinStatus === 'connecting' || roomJoinStatus === 'timed_out') {
+        return;
+      }
+
       const activeRoomId = targetRoomName || roomIdRef.current || ensureActiveRoom(grid);
       const isTargetingCurrent = !targetRoomName || targetRoomName === roomIdRef.current;
       const storedUuid = await getStoredRoomUuid(activeRoomId);
@@ -562,11 +650,13 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       const updatedList = await listRoomSnapshots();
       setSavedRooms(updatedList);
     },
-    [roomUuid, isRoomActiveInUrl, ensureActiveRoom, addStatusEvent]
+    [roomJoinStatus, roomUuid, isRoomActiveInUrl, ensureActiveRoom, addStatusEvent]
   );
 
   const restoreRoom = useCallback(
     async (targetRoomName: string): Promise<RoomSnapshotData | null> => {
+      clearJoinTimeout();
+      setRoomJoinStatus('connected');
       const snapshot = await loadRoomSnapshot(targetRoomName);
       if (!snapshot) return null;
 
@@ -584,8 +674,27 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       sessionManagerRef.current?.requestSnapshot();
       return snapshot;
     },
-    [options]
+    [options, clearJoinTimeout]
   );
+
+  const retryJoinRoom = useCallback(() => {
+    clearJoinTimeout();
+    setRoomJoinStatus('connecting');
+    addStatusEvent('info', `Retrying connection to room "${roomIdRef.current}"...`);
+    if (sessionManagerRef.current) {
+      sessionManagerRef.current.changeRoom(roomIdRef.current, roomUuidRef.current);
+      sessionManagerRef.current.requestSnapshot();
+    }
+    startJoinTimeout();
+  }, [clearJoinTimeout, startJoinTimeout, addStatusEvent]);
+
+  const cancelJoinRoom = useCallback(() => {
+    clearJoinTimeout();
+    setRoomJoinStatus('idle');
+    const newRoomName = generateNewRoom();
+    addStatusEvent('info', `Cancelled joining room. Created fresh room "${newRoomName}"`);
+    return newRoomName;
+  }, [clearJoinTimeout, generateNewRoom, addStatusEvent]);
 
   const copyRoomToNewSave = useCallback(
     async (sourceRoomName: string): Promise<RoomSnapshotData | null> => {
@@ -704,6 +813,9 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     roomId,
     roomUuid,
     isRoomActiveInUrl,
+    roomJoinStatus,
+    retryJoinRoom,
+    cancelJoinRoom,
     statusEvents,
     clearStatusEvents,
     setRoomId,
