@@ -7,11 +7,15 @@ import {
   Clock,
   Layers,
   FolderX,
+  Users,
+  RefreshCw,
 } from 'lucide-react';
 import {
   type RoomMetadata,
   loadRoomSnapshot,
 } from '../../../core/peer/peerRoomStorage';
+import type { ConnectedPeer } from '../../../core/peer/peerIdentity';
+import { useRoomPeerCounts } from '../hooks/useRoomPeerCounts';
 
 export interface RoomThumbnailProps {
   roomName: string;
@@ -97,6 +101,7 @@ export interface RoomStorageModalProps {
   onLoadRoom: (roomName: string) => void;
   onCopyToNewSave: (roomName: string) => void;
   onDeleteRoom: (roomName: string) => void;
+  connectedPeers?: ConnectedPeer[];
 }
 
 function formatTimestamp(timestamp: number): string {
@@ -121,7 +126,15 @@ export const RoomStorageModal: React.FC<RoomStorageModalProps> = ({
   onLoadRoom,
   onCopyToNewSave,
   onDeleteRoom,
+  connectedPeers = [],
 }) => {
+  const { peerCounts, isLoading, refresh } = useRoomPeerCounts({
+    savedRooms,
+    currentRoomId,
+    connectedPeersCount: connectedPeers.length,
+    isOpen,
+  });
+
   // Handle escape key
   useEffect(() => {
     if (!isOpen) return;
@@ -163,13 +176,27 @@ export const RoomStorageModal: React.FC<RoomStorageModalProps> = ({
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-md hover:bg-[#1f2433] text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
-            aria-label="Close modal"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={isLoading}
+              className={`p-1.5 rounded-md hover:bg-[#1f2433] text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer disabled:opacity-50 ${
+                isLoading ? 'text-cyan-400' : ''
+              }`}
+              title={isLoading ? 'Checking tracker swarms...' : 'Refresh peer counts'}
+              aria-label="Refresh peer counts"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-md hover:bg-[#1f2433] text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              aria-label="Close modal"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* MODAL BODY */}
@@ -178,6 +205,7 @@ export const RoomStorageModal: React.FC<RoomStorageModalProps> = ({
             <div className="space-y-2.5">
               {savedRooms.map((room) => {
                 const isCurrent = room.roomName === currentRoomId;
+                const peerCount = peerCounts[room.roomName];
 
                 return (
                   <div
@@ -201,6 +229,59 @@ export const RoomStorageModal: React.FC<RoomStorageModalProps> = ({
                           {isCurrent && (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0">
                               Active Room
+                            </span>
+                          )}
+
+                          {/* Peer count badge */}
+                          {isCurrent ? (
+                            <span
+                              data-slot="room-peer-badge"
+                              data-room={room.roomName}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 shrink-0"
+                              title={`${connectedPeers.length} peer(s) connected`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                              <Users className="w-2.5 h-2.5" />
+                              <span>{`${connectedPeers.length} online`}</span>
+                            </span>
+                          ) : peerCount !== undefined ? (
+                            <span
+                              data-slot="room-peer-badge"
+                              data-room={room.roomName}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium shrink-0 ${
+                                peerCount > 0
+                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-[0_0_8px_rgba(16,185,129,0.15)]'
+                                  : 'bg-slate-800/60 text-slate-400 border border-slate-700/40'
+                              }`}
+                              title={`${peerCount} peer(s) active on tracker`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  peerCount > 0 ? 'bg-emerald-400' : 'bg-slate-500'
+                                }`}
+                              />
+                              <Users className="w-2.5 h-2.5" />
+                              <span>{`${peerCount} online`}</span>
+                            </span>
+                          ) : isLoading ? (
+                            <span
+                              data-slot="room-peer-badge"
+                              data-room={room.roomName}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-slate-800/40 text-slate-500 border border-slate-700/30 shrink-0"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-600 animate-pulse" />
+                              <span>checking...</span>
+                            </span>
+                          ) : (
+                            <span
+                              data-slot="room-peer-badge"
+                              data-room={room.roomName}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-slate-800/60 text-slate-400 border border-slate-700/40 shrink-0"
+                              title="0 peer(s) active on tracker"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                              <Users className="w-2.5 h-2.5" />
+                              <span>0 online</span>
                             </span>
                           )}
                         </div>
@@ -279,9 +360,17 @@ export const RoomStorageModal: React.FC<RoomStorageModalProps> = ({
 
         {/* MODAL FOOTER */}
         <div className="flex items-center justify-between px-5 py-3 border-t border-[#212636] bg-[#0e1017]">
-          <span className="text-[11px] font-mono text-slate-400">
-            {`${savedRooms.length} ${savedRooms.length === 1 ? 'room' : 'rooms'} saved locally`}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono text-slate-400">
+              {`${savedRooms.length} ${savedRooms.length === 1 ? 'room' : 'rooms'} saved locally`}
+            </span>
+            {isLoading && (
+              <span className="text-[10px] font-mono text-cyan-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                scraping...
+              </span>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}

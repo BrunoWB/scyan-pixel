@@ -124,4 +124,62 @@ describe('RoomStorageModal component', () => {
     expect(html).toContain('Copy to New');
     expect(html).toContain('aria-label="Delete montreal-wolf-roar"');
   });
+
+  it('renders refresh button for tracker peer counts in modal header', () => {
+    const html = renderToString(<RoomStorageModal {...defaultProps} />);
+
+    expect(html).toContain('aria-label="Refresh peer counts"');
+    expect(html).toMatch(/title="(?:Refresh peer counts|Checking tracker swarms\.\.\.)"/);
+  });
+
+  it('renders live connected peer count for currently active room', () => {
+    const mockConnectedPeers = [
+      { id: 'peer-1', name: 'Alice', color: '#ff0000', joinedAt: Date.now() },
+      { id: 'peer-2', name: 'Bob', color: '#00ff00', joinedAt: Date.now() },
+    ];
+
+    const html = renderToString(
+      <RoomStorageModal
+        {...defaultProps}
+        currentRoomId="montreal-wolf-roar"
+        connectedPeers={mockConnectedPeers}
+      />
+    );
+
+    expect(html).toContain('data-slot="room-peer-badge"');
+    expect(html).toContain('2 online');
+    expect(html).toContain('data-room="montreal-wolf-roar"');
+  });
+
+  it('renders checking indicator for other saved rooms when scrape is in flight', () => {
+    const multiRooms = [
+      ...mockSavedRooms,
+      {
+        roomId: 'room-remote',
+        roomName: 'other-remote-room',
+        roomUuid: 'uuid-remote',
+        createdAt: 1000,
+        updatedAt: 2000,
+        width: 32,
+        height: 32,
+        pixelCount: 5,
+      },
+    ];
+
+    const html = renderToString(
+      <RoomStorageModal
+        {...defaultProps}
+        savedRooms={multiRooms}
+        currentRoomId="montreal-wolf-roar"
+      />
+    );
+
+    expect(html).toContain('data-room="other-remote-room"');
+    expect(html).toContain('checking...');
+  });
+
+  it('renders scraping indicator in modal footer when loading', () => {
+    const html = renderToString(<RoomStorageModal {...defaultProps} />);
+    expect(html).toContain('scraping...');
+  });
 });

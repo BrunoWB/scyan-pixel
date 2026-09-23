@@ -1637,6 +1637,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onClose={peerSession.closeLoadModal}
         savedRooms={peerSession.savedRooms}
         currentRoomId={peerSession.roomId}
+        connectedPeers={peerSession.connectedPeers}
         onLoadRoom={handleLoadRoom}
         onCopyToNewSave={handleCopyToNewSave}
         onDeleteRoom={peerSession.deleteRoom}
