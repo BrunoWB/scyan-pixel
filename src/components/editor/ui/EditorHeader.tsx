@@ -6,18 +6,16 @@ import {
   RotateCw,
   FlipHorizontal,
   FlipVertical,
-  Upload,
-  Share2,
   Minus,
   Plus,
   FilePlus,
   FolderOpen,
+  UserPlus,
 } from 'lucide-react';
 import { BrandIdentityLogo, BrandWolfMascot } from '../../brand/BrandIdentityLogo';
 import { ColorPicker } from '../../ColorPicker';
 import { RecentPalette, type RecentPaletteHandle } from '../../RecentPalette';
 import { BackgroundPicker } from '../../BackgroundPicker';
-import { SaveExportMenu } from './SaveExportMenu';
 import { PeerAvatar } from './PeerAvatar';
 import type { ConnectedPeer } from '../../../core/peer/peerIdentity';
 
@@ -92,14 +90,14 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   activeBgColor,
   onBgColorChange,
   onOpenCanvasEyedropper,
-  onOpenImportModal,
-  onExportPNG,
-  onExportCArray,
-  onExportJSON,
-  onSaveJSONFile,
-  onDownloadCHeader,
-  selectionBounds,
-  canvasDimensions,
+  onOpenImportModal: _onOpenImportModal,
+  onExportPNG: _onExportPNG,
+  onExportCArray: _onExportCArray,
+  onExportJSON: _onExportJSON,
+  onSaveJSONFile: _onSaveJSONFile,
+  onDownloadCHeader: _onDownloadCHeader,
+  selectionBounds: _selectionBounds,
+  canvasDimensions: _canvasDimensions,
   onOpenShareModal,
   connectedPeers = [],
   onNewCanvas,
@@ -154,27 +152,29 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
 
         {/* Action Controls: New/Load, Undo/Redo, Brush Size, Transforms (scrollable on narrow screens) */}
         <div className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto py-1">
-          {/* New Canvas & Load Saved Room */}
-          <div className="flex items-center gap-1 shrink-0 bg-[#090b10] border border-[#1e2332] rounded-md px-1.5 py-1">
+          {/* New Canvas & Load Modal Button */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={onNewCanvas}
               disabled={!onNewCanvas}
-              className="p-2 rounded-md hover:bg-[#1c2230] text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 hover:text-white bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] transition shadow-xs cursor-pointer active:scale-98 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               title="New Canvas / New Room"
               aria-label="New Canvas / New Room"
             >
               <FilePlus className="w-3.5 h-3.5 text-cyan-400" />
+              <span>New</span>
             </button>
             <button
               type="button"
               onClick={onOpenLoadModal}
               disabled={!onOpenLoadModal}
-              className="p-2 rounded-md hover:bg-[#1c2230] text-slate-300 hover:text-white transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-              title="Load Saved Room"
-              aria-label="Load Saved Room"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 hover:text-white bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] transition shadow-xs cursor-pointer active:scale-98 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              title="Load Saved Room, Import and Export"
+              aria-label="Load Saved Room, Import and Export"
             >
               <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+              <span>Load</span>
             </button>
           </div>
 
@@ -321,40 +321,17 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
 
         <div className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0" />
 
-        {/* Image Import Button */}
-        <button
-          onClick={onOpenImportModal}
-          className="flex items-center gap-1.5 px-2.5 py-1 bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] rounded-md text-xs text-slate-200 hover:text-white transition-all shadow-xs cursor-pointer active:scale-98"
-          title="Import Image (PNG, JPG, BMP, GIF)"
-        >
-          <Upload className="w-3.5 h-3.5 text-slate-400" />
-          <span className="hidden sm:inline font-medium">Import</span>
-        </button>
-
-        {/* Modern Save / Download / Export Menu */}
-        <SaveExportMenu
-          onExportPNG={onExportPNG}
-          onExportCArray={onExportCArray}
-          onExportJSON={onExportJSON}
-          onSaveJSONFile={onSaveJSONFile}
-          onDownloadCHeader={onDownloadCHeader}
-          selectionBounds={selectionBounds}
-          canvasDimensions={canvasDimensions}
-        />
-
-        {/* Division next to Export */}
-        <div className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0" />
-
-        {/* Share Button & Connected Peers next to it */}
+        {/* Invite Button & Connected Peers next to it */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             type="button"
             onClick={onOpenShareModal}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] rounded-md text-xs text-slate-200 hover:text-white transition-all shadow-xs cursor-pointer active:scale-98"
-            title="Share canvas & manage peer session"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] rounded-md text-xs text-slate-200 hover:text-white transition-all shadow-xs cursor-pointer active:scale-98"
+            title="Invite peers & manage session"
+            aria-label="Invite peers & manage session"
           >
-            <Share2 className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden sm:inline font-medium">Share</span>
+            <UserPlus className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline font-medium">Invite</span>
             {connectedPeers.length > 0 && (
               <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                 {connectedPeers.length}

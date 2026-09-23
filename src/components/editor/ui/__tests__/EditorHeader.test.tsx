@@ -74,22 +74,31 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
     expect(html).not.toContain('<button>4</button>');
   });
 
-  it('renders modern unified Export button and removes fragmented export buttons', () => {
+  it('renders increased New and Load buttons between logo and undo/redo', () => {
     const html = renderToString(<EditorHeader {...defaultProps} />);
 
-    expect(html).toContain('Export');
-    expect(html).not.toContain('<span>PNG</span>');
+    // Renders "New" and "Load" prominent action buttons with text labels and icons
+    expect(html).toContain('New');
+    expect(html).toContain('Load');
+    expect(html).toContain('title="New Canvas / New Room"');
+    expect(html).toContain('title="Load Saved Room, Import and Export"');
+    expect(html).toContain('aria-label="Load Saved Room, Import and Export"');
+
+    // Includes FilePlus and FolderOpen icons
+    expect(html).toContain('lucide-file-plus');
+    expect(html).toContain('lucide-folder-open');
   });
 
-  it('renders division and Share button next to Export', () => {
+  it('renders division and Invite button on the right', () => {
     const html = renderToString(<EditorHeader {...defaultProps} />);
 
-    // Renders division and Share button
-    expect(html).toContain('Share');
+    // Renders division and Invite button with UserPlus icon
+    expect(html).toContain('Invite');
+    expect(html).toContain('lucide-user-plus');
     expect(html).toContain('bg-gradient-to-b from-transparent via-[#2c3344] to-transparent');
   });
 
-  it('renders connected peer badges next to Share button when peers are present', () => {
+  it('renders connected peer badges next to Invite button when peers are present', () => {
     const peers = [
       { id: '1', name: 'montreal-wolf', color: '#06b6d4' },
       { id: '2', name: 'tokyo-kitsune', color: '#f43f5e' },
@@ -107,19 +116,5 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
     const html = renderToString(<EditorHeader {...defaultProps} connectedPeers={[]} />);
 
     expect(html).not.toContain('connected peer(s)');
-  });
-
-  it('renders New Canvas and Load Saved Room buttons between logo and undo/redo', () => {
-    const html = renderToString(<EditorHeader {...defaultProps} />);
-
-    // Renders "New Canvas / New Room" and "Load Saved Room" action buttons
-    expect(html).toContain('title="New Canvas / New Room"');
-    expect(html).toContain('aria-label="New Canvas / New Room"');
-    expect(html).toContain('title="Load Saved Room"');
-    expect(html).toContain('aria-label="Load Saved Room"');
-
-    // Includes FilePlus and FolderOpen icons
-    expect(html).toContain('lucide-file-plus');
-    expect(html).toContain('lucide-folder-open');
   });
 });

@@ -1,13 +1,19 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import 'fake-indexeddb/auto';
 import { renderToString } from 'react-dom/server';
 import { usePeerSession } from '../usePeerSession';
 import { PixelGrid } from '../../../../core/PixelGrid';
-import { loadRoomSnapshot, listRoomSnapshots } from '../../../../core/peer/peerRoomStorage';
+import {
+  loadRoomSnapshot,
+  listRoomSnapshots,
+  closeDB,
+  DB_NAME,
+} from '../../../../core/peer/peerRoomStorage';
 
 describe('usePeerSession hook', () => {
   let mockStore: Record<string, string> = {};
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockStore = {};
     const localStorageMock = {
       getItem: vi.fn((key: string) => mockStore[key] ?? null),
@@ -32,6 +38,18 @@ describe('usePeerSession hook', () => {
       removeEventListener: vi.fn(),
     });
     vi.stubGlobal('localStorage', localStorageMock);
+
+    await closeDB();
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    });
+  });
+
+  afterEach(async () => {
+    await closeDB();
   });
   it('provides complete collaborative session API and initialized profile', () => {
     function TestComponent() {
@@ -184,7 +202,7 @@ describe('usePeerSession hook', () => {
     expect(summary.isConflictModalOpen).toBe(false);
   });
 
-  it('defers saving snapshot to storage when creating or activating an empty room until modified', () => {
+  it('defers saving snapshot to storage when creating or activating an empty room until modified', async () => {
     const holder: { session?: ReturnType<typeof usePeerSession> } = {};
     // oxlint-disable-next-line react/immutability, react/globals
     function TestComponent() {
@@ -198,43 +216,45 @@ describe('usePeerSession hook', () => {
     const session = holder.session!;
 
     // 1. Initial state: no rooms saved
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // 2. ensureActiveRoom on empty grid does not create a saved room
     const blankGrid = new PixelGrid(16, 16);
     const room1 = session.ensureActiveRoom(blankGrid);
-    expect(loadRoomSnapshot(room1)).toBeNull();
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await loadRoomSnapshot(room1)).toBeNull();
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // 3. saveRoom on a blank grid with no existing record does not save
-    session.saveRoom(blankGrid, undefined, room1);
-    expect(loadRoomSnapshot(room1)).toBeNull();
-    expect(listRoomSnapshots()).toHaveLength(0);
+    await session.saveRoom(blankGrid, undefined, room1);
+    expect(await loadRoomSnapshot(room1)).toBeNull();
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // 4. generateNewRoom creates a new room ID but does not save an empty snapshot
     const room2 = session.generateNewRoom();
-    expect(loadRoomSnapshot(room2)).toBeNull();
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await loadRoomSnapshot(room2)).toBeNull();
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // 5. Drawing/modifying the grid (e.g. setting a pixel) and calling saveRoom DOES persist the room
     const modifiedGrid = new PixelGrid(16, 16);
     modifiedGrid.set(2, 3, 1, '#00e5a3');
-    session.saveRoom(modifiedGrid, undefined, room2);
+    await session.saveRoom(modifiedGrid, undefined, room2);
 
-    expect(loadRoomSnapshot(room2)).not.toBeNull();
-    const saved = loadRoomSnapshot(room2);
+    expect(await loadRoomSnapshot(room2)).not.toBeNull();
+    const saved = await loadRoomSnapshot(room2);
     expect(saved?.roomName).toBe(room2);
     expect(saved?.pixelCount).toBe(1);
-    expect(listRoomSnapshots().map((r) => r.roomName)).toContain(room2);
+    const allRooms = await listRoomSnapshots();
+    expect(allRooms.map((r) => r.roomName)).toContain(room2);
 
     // 6. Clearing the already-persisted room updates the existing record
     const clearedGrid = new PixelGrid(16, 16);
-    session.saveRoom(clearedGrid, undefined, room2);
-    expect(loadRoomSnapshot(room2)).not.toBeNull();
-    expect(loadRoomSnapshot(room2)?.pixelCount).toBe(0);
+    await session.saveRoom(clearedGrid, undefined, room2);
+    expect(await loadRoomSnapshot(room2)).not.toBeNull();
+    const clearedSnapshot = await loadRoomSnapshot(room2);
+    expect(clearedSnapshot?.pixelCount).toBe(0);
   });
 
-  it('does not save a snapshot when opening share modal or getting share url on a blank canvas', () => {
+  it('does not save a snapshot when opening share modal or getting share url on a blank canvas', async () => {
     const holder: { session?: ReturnType<typeof usePeerSession> } = {};
     // oxlint-disable-next-line react/immutability, react/globals
     function TestComponent() {
@@ -246,24 +266,24 @@ describe('usePeerSession hook', () => {
     renderToString(<TestComponent />);
     const session = holder.session!;
 
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // Call getShareUrl on empty canvas
     const url = session.getShareUrl();
     expect(url).toContain('#room=');
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // Open share modal on empty canvas
     session.openShareModal();
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // Repeated generateNewRoom calls
     session.generateNewRoom();
     session.generateNewRoom();
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await listRoomSnapshots()).toHaveLength(0);
   });
 
-  it('does not create an empty save when resolving conflict with a blank canvas', () => {
+  it('does not create an empty save when resolving conflict with a blank canvas', async () => {
     let mockGrid = new PixelGrid(16, 16);
     const holder: { session?: ReturnType<typeof usePeerSession> } = {};
     // oxlint-disable-next-line react/immutability, react/globals
@@ -280,7 +300,7 @@ describe('usePeerSession hook', () => {
 
     // Resolve conflict with blank canvas
     session.resolveConflictKeepLocal();
-    expect(listRoomSnapshots()).toHaveLength(0);
+    expect(await listRoomSnapshots()).toHaveLength(0);
 
     // Now with pixels
     mockGrid = new PixelGrid(16, 16);
@@ -288,11 +308,12 @@ describe('usePeerSession hook', () => {
     // Simulate setting conflict info
     const conflictSession = holder.session!;
     // Calling saveRoom on a modified canvas persists
-    conflictSession.saveRoom(mockGrid);
-    expect(listRoomSnapshots().length).toBeGreaterThan(0);
+    await conflictSession.saveRoom(mockGrid);
+    const rooms = await listRoomSnapshots();
+    expect(rooms.length).toBeGreaterThan(0);
   });
 
-  it('does not cross-contaminate active room UUID when saving another room', () => {
+  it('does not cross-contaminate active room UUID when saving another room', async () => {
     const holder: { session?: ReturnType<typeof usePeerSession> } = {};
     // oxlint-disable-next-line react/immutability, react/globals
     function TestComponent() {
@@ -310,13 +331,13 @@ describe('usePeerSession hook', () => {
     const grid = new PixelGrid(16, 16);
     grid.set(0, 0, 1, '#123456');
 
-    session.saveRoom(grid, undefined, targetRoom);
-    const savedTarget = loadRoomSnapshot(targetRoom);
+    await session.saveRoom(grid, undefined, targetRoom);
+    const savedTarget = await loadRoomSnapshot(targetRoom);
     expect(savedTarget).not.toBeNull();
     expect(savedTarget?.roomName).toBe(targetRoom);
 
     // Active room remains unsaved
-    expect(loadRoomSnapshot(activeRoom)).toBeNull();
+    expect(await loadRoomSnapshot(activeRoom)).toBeNull();
   });
 });
 

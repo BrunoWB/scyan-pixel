@@ -182,4 +182,36 @@ describe('RoomStorageModal component', () => {
     const html = renderToString(<RoomStorageModal {...defaultProps} />);
     expect(html).toContain('scraping...');
   });
+
+  it('renders Import tab content when initialTab is import', () => {
+    const onOpenImportModal = vi.fn();
+    const html = renderToString(
+      <RoomStorageModal
+        {...defaultProps}
+        initialTab="import"
+        onOpenImportModal={onOpenImportModal}
+      />
+    );
+
+    expect(html).toContain('Import Raster Art or Animation');
+    expect(html).toContain('Choose Image or GIF...');
+  });
+
+  it('renders Export tab content with export buttons when initialTab is export', () => {
+    const html = renderToString(
+      <RoomStorageModal
+        {...defaultProps}
+        initialTab="export"
+        canvasDimensions={{ width: 64, height: 64 }}
+      />
+    );
+
+    expect(html).toContain('Save Project (.json)');
+    expect(html).toContain('View Project JSON');
+    expect(html).toContain('PNG (Full Color)');
+    expect(html).toContain('PNG (Monochrome)');
+    expect(html).toContain('PNG (Transparent)');
+    expect(html).toContain('Download C Header (.h)');
+    expect(html).toContain('View C Array Code');
+  });
 });

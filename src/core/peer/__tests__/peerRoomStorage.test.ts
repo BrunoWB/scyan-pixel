@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import 'fake-indexeddb/auto';
 import {
   saveRoomSnapshot,
   loadRoomSnapshot,
@@ -7,14 +8,17 @@ import {
   getStoredRoomUuid,
   updateStoredRoomUuid,
   forkRoomSnapshot,
-  type RoomSnapshotData,
+  closeDB,
+  DB_NAME,
   ROOMS_INDEX_STORAGE_KEY,
+  getRoomStorageKey,
+  type RoomSnapshotData,
 } from '../peerRoomStorage';
 
-describe('peerRoomStorage', () => {
+describe('peerRoomStorage (IndexedDB)', () => {
   let mockStore: Record<string, string> = {};
 
-  beforeEach(() => {
+  beforeEach(async () => {
     mockStore = {};
     const localStorageMock = {
       getItem: vi.fn((key: string) => mockStore[key] ?? null),
@@ -30,9 +34,21 @@ describe('peerRoomStorage', () => {
     };
     vi.stubGlobal('window', { localStorage: localStorageMock });
     vi.stubGlobal('localStorage', localStorageMock);
+
+    await closeDB();
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase(DB_NAME);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    });
   });
 
-  it('saves and loads a room snapshot', () => {
+  afterEach(async () => {
+    await closeDB();
+  });
+
+  it('saves and loads a room snapshot', async () => {
     const snapshot: RoomSnapshotData = {
       roomName: 'montreal-lion-roar',
       roomUuid: 'uuid-1234',
@@ -44,14 +60,14 @@ describe('peerRoomStorage', () => {
       pixelCount: 1,
     };
 
-    saveRoomSnapshot(snapshot);
-    const loaded = loadRoomSnapshot('montreal-lion-roar');
+    await saveRoomSnapshot(snapshot);
+    const loaded = await loadRoomSnapshot('montreal-lion-roar');
 
     expect(loaded).toEqual(snapshot);
-    expect(getStoredRoomUuid('montreal-lion-roar')).toBe('uuid-1234');
+    expect(await getStoredRoomUuid('montreal-lion-roar')).toBe('uuid-1234');
   });
 
-  it('saves and loads snapshots with canvasData and roomId', () => {
+  it('saves and loads snapshots with canvasData and roomId', async () => {
     const snapshot: RoomSnapshotData = {
       roomId: 'uuid-custom-5678',
       roomName: 'tokyo-falcon-glide',
@@ -69,21 +85,21 @@ describe('peerRoomStorage', () => {
       },
     };
 
-    saveRoomSnapshot(snapshot);
-    const loaded = loadRoomSnapshot('tokyo-falcon-glide');
+    await saveRoomSnapshot(snapshot);
+    const loaded = await loadRoomSnapshot('tokyo-falcon-glide');
 
     expect(loaded).toEqual(snapshot);
     expect(loaded?.roomId).toBe('uuid-custom-5678');
     expect(loaded?.canvasData?.pixels).toEqual([[4, 5, '#00ffaa']]);
   });
 
-  it('returns null for non-existent room snapshot', () => {
-    expect(loadRoomSnapshot('non-existent')).toBeNull();
-    expect(getStoredRoomUuid('non-existent')).toBeNull();
+  it('returns null for non-existent room snapshot', async () => {
+    expect(await loadRoomSnapshot('non-existent')).toBeNull();
+    expect(await getStoredRoomUuid('non-existent')).toBeNull();
   });
 
-  it('lists room snapshots sorted by updatedAt descending', () => {
-    saveRoomSnapshot({
+  it('lists room snapshots sorted by updatedAt descending', async () => {
+    await saveRoomSnapshot({
       roomName: 'room-alpha',
       roomUuid: 'uuid-a',
       createdAt: 1000,
@@ -94,7 +110,7 @@ describe('peerRoomStorage', () => {
       pixelCount: 0,
     });
 
-    saveRoomSnapshot({
+    await saveRoomSnapshot({
       roomName: 'room-beta',
       roomUuid: 'uuid-b',
       createdAt: 1000,
@@ -105,7 +121,7 @@ describe('peerRoomStorage', () => {
       pixelCount: 0,
     });
 
-    saveRoomSnapshot({
+    await saveRoomSnapshot({
       roomName: 'room-gamma',
       roomUuid: 'uuid-c',
       createdAt: 1000,
@@ -116,14 +132,14 @@ describe('peerRoomStorage', () => {
       pixelCount: 0,
     });
 
-    const list = listRoomSnapshots();
+    const list = await listRoomSnapshots();
     expect(list).toHaveLength(3);
     expect(list[0].roomName).toBe('room-beta');
     expect(list[1].roomName).toBe('room-gamma');
     expect(list[2].roomName).toBe('room-alpha');
   });
 
-  it('updates existing snapshot in index when resaved', () => {
+  it('updates existing snapshot in index when resaved', async () => {
     const snap1: RoomSnapshotData = {
       roomName: 'montreal-wolf-leap',
       roomUuid: 'uuid-1',
@@ -134,7 +150,7 @@ describe('peerRoomStorage', () => {
       pixels: [],
       pixelCount: 0,
     };
-    saveRoomSnapshot(snap1);
+    await saveRoomSnapshot(snap1);
 
     const snap2: RoomSnapshotData = {
       ...snap1,
@@ -142,16 +158,16 @@ describe('peerRoomStorage', () => {
       pixels: [[0, 0, '#ffffff']],
       pixelCount: 1,
     };
-    saveRoomSnapshot(snap2);
+    await saveRoomSnapshot(snap2);
 
-    const list = listRoomSnapshots();
+    const list = await listRoomSnapshots();
     expect(list).toHaveLength(1);
     expect(list[0].updatedAt).toBe(2500);
     expect(list[0].pixelCount).toBe(1);
   });
 
-  it('deletes a snapshot and updates the index', () => {
-    saveRoomSnapshot({
+  it('deletes a snapshot and updates the index', async () => {
+    await saveRoomSnapshot({
       roomName: 'room-to-delete',
       roomUuid: 'uuid-del',
       createdAt: 1000,
@@ -162,15 +178,15 @@ describe('peerRoomStorage', () => {
       pixelCount: 0,
     });
 
-    expect(loadRoomSnapshot('room-to-delete')).not.toBeNull();
-    deleteRoomSnapshot('room-to-delete');
+    expect(await loadRoomSnapshot('room-to-delete')).not.toBeNull();
+    await deleteRoomSnapshot('room-to-delete');
 
-    expect(loadRoomSnapshot('room-to-delete')).toBeNull();
-    expect(listRoomSnapshots()).toEqual([]);
+    expect(await loadRoomSnapshot('room-to-delete')).toBeNull();
+    expect(await listRoomSnapshots()).toEqual([]);
   });
 
-  it('updates stored UUID for a room snapshot', () => {
-    saveRoomSnapshot({
+  it('updates stored UUID for a room snapshot', async () => {
+    await saveRoomSnapshot({
       roomName: 'shared-room',
       roomUuid: 'old-uuid',
       createdAt: 1000,
@@ -181,19 +197,14 @@ describe('peerRoomStorage', () => {
       pixelCount: 0,
     });
 
-    updateStoredRoomUuid('shared-room', 'new-remote-uuid');
-    expect(getStoredRoomUuid('shared-room')).toBe('new-remote-uuid');
-    const loaded = loadRoomSnapshot('shared-room');
+    await updateStoredRoomUuid('shared-room', 'new-remote-uuid');
+    expect(await getStoredRoomUuid('shared-room')).toBe('new-remote-uuid');
+    const loaded = await loadRoomSnapshot('shared-room');
     expect(loaded?.roomUuid).toBe('new-remote-uuid');
   });
 
-  it('handles invalid corrupted localStorage JSON gracefully', () => {
-    mockStore[ROOMS_INDEX_STORAGE_KEY] = 'invalid-json{{{';
-    expect(listRoomSnapshots()).toEqual([]);
-  });
-
-  it('forks an existing room snapshot to a new save with a fresh name and UUID', () => {
-    saveRoomSnapshot({
+  it('forks an existing room snapshot to a new save with a fresh name and UUID', async () => {
+    await saveRoomSnapshot({
       roomName: 'original-source-room',
       roomUuid: 'orig-uuid-111',
       createdAt: 1000,
@@ -204,7 +215,7 @@ describe('peerRoomStorage', () => {
       pixelCount: 1,
     });
 
-    const forked = forkRoomSnapshot('original-source-room', 'montreal-wolf');
+    const forked = await forkRoomSnapshot('original-source-room', 'montreal-wolf');
     expect(forked).not.toBeNull();
     expect(forked!.roomName).not.toBe('original-source-room');
     expect(forked!.roomName.startsWith('montreal-wolf-')).toBe(true);
@@ -217,20 +228,59 @@ describe('peerRoomStorage', () => {
     expect(forked!.pixels[0][2]).toBe('#00e5a3');
 
     // Check that it's persisted in storage
-    const loadedFork = loadRoomSnapshot(forked!.roomName);
+    const loadedFork = await loadRoomSnapshot(forked!.roomName);
     expect(loadedFork).not.toBeNull();
     expect(loadedFork?.roomName).toBe(forked!.roomName);
     expect(loadedFork?.roomUuid).toBe(forked!.roomUuid);
 
     // Both original and forked rooms are in the index
-    const list = listRoomSnapshots();
+    const list = await listRoomSnapshots();
     expect(list).toHaveLength(2);
     expect(list.some((r) => r.roomName === 'original-source-room')).toBe(true);
     expect(list.some((r) => r.roomName === forked!.roomName)).toBe(true);
   });
 
-  it('returns null when attempting to fork a non-existent room', () => {
-    const forked = forkRoomSnapshot('does-not-exist', 'test-user');
+  it('returns null when attempting to fork a non-existent room', async () => {
+    const forked = await forkRoomSnapshot('does-not-exist', 'test-user');
     expect(forked).toBeNull();
+  });
+
+  it('automatically migrates legacy localStorage snapshots on database initialization', async () => {
+    const legacyRoom: RoomSnapshotData = {
+      roomName: 'legacy-room-1',
+      roomUuid: 'legacy-uuid-1',
+      createdAt: 12345,
+      updatedAt: 12345,
+      width: 16,
+      height: 16,
+      pixels: [[0, 0, '#ffffff']],
+      pixelCount: 1,
+    };
+
+    mockStore[ROOMS_INDEX_STORAGE_KEY] = JSON.stringify([
+      {
+        roomName: 'legacy-room-1',
+        roomUuid: 'legacy-uuid-1',
+        createdAt: 12345,
+        updatedAt: 12345,
+        pixelCount: 1,
+        width: 16,
+        height: 16,
+      },
+    ]);
+    mockStore[getRoomStorageKey('legacy-room-1')] = JSON.stringify(legacyRoom);
+
+    // Opening DB triggers migration
+    const rooms = await listRoomSnapshots();
+    expect(rooms).toHaveLength(1);
+    expect(rooms[0].roomName).toBe('legacy-room-1');
+
+    const loaded = await loadRoomSnapshot('legacy-room-1');
+    expect(loaded?.roomName).toBe('legacy-room-1');
+    expect(loaded?.roomUuid).toBe('legacy-uuid-1');
+
+    // Verify localStorage was cleaned up
+    expect(mockStore[ROOMS_INDEX_STORAGE_KEY]).toBeUndefined();
+    expect(mockStore[getRoomStorageKey('legacy-room-1')]).toBeUndefined();
   });
 });

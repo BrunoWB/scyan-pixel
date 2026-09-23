@@ -78,10 +78,10 @@ export interface UsePeerSessionReturn {
     timestamps?: PixelTimestampTracker,
     targetRoomName?: string,
     targetRoomUuid?: string
-  ) => void;
-  restoreRoom: (roomName: string) => RoomSnapshotData | null;
-  copyRoomToNewSave: (sourceRoomName: string) => RoomSnapshotData | null;
-  deleteRoom: (roomName: string) => void;
+  ) => Promise<void>;
+  restoreRoom: (roomName: string) => Promise<RoomSnapshotData | null>;
+  copyRoomToNewSave: (sourceRoomName: string) => Promise<RoomSnapshotData | null>;
+  deleteRoom: (roomName: string) => Promise<void>;
   // Conflict modal
   conflictInfo: RoomConflictEvent | null;
   isConflictModalOpen: boolean;
@@ -114,13 +114,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     return generateRoomName(profile.name);
   });
 
-  const [roomUuid, setRoomUuidState] = useState<string>(() => {
-    if (initialUrlMatch?.[1]) {
-      const storedUuid = getStoredRoomUuid(initialUrlMatch[1]);
-      return storedUuid || '';
-    }
-    return '';
-  });
+  const [roomUuid, setRoomUuidState] = useState<string>('');
 
   const roomIdRef = useRef(roomId);
   useEffect(() => {
@@ -134,7 +128,28 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isLoadModalOpen, setIsLoadModalOpen] = useState<boolean>(false);
-  const [savedRooms, setSavedRooms] = useState<RoomMetadata[]>(() => listRoomSnapshots());
+  const [savedRooms, setSavedRooms] = useState<RoomMetadata[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (initialUrlMatch?.[1]) {
+      void getStoredRoomUuid(initialUrlMatch[1]).then((uuid) => {
+        if (isMounted && uuid) {
+          roomUuidRef.current = uuid;
+          setRoomUuidState(uuid);
+        }
+      });
+    }
+    void listRoomSnapshots().then((rooms) => {
+      if (isMounted) {
+        setSavedRooms(rooms);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [initialUrlMatch]);
+
   const [conflictInfo, setConflictInfo] = useState<RoomConflictEvent | null>(null);
   const [isConflictModalOpen, setIsConflictModalOpen] = useState<boolean>(false);
 
@@ -193,10 +208,13 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         roomIdRef.current = newName;
         setRoomIdState(newName);
         setIsRoomActiveInUrl(true);
-        const storedUuid = getStoredRoomUuid(newName);
-        const effectiveUuid = storedUuid || '';
-        roomUuidRef.current = effectiveUuid;
-        setRoomUuidState(effectiveUuid);
+        void getStoredRoomUuid(newName).then((storedUuid) => {
+          if (roomIdRef.current === newName) {
+            const effectiveUuid = storedUuid || '';
+            roomUuidRef.current = effectiveUuid;
+            setRoomUuidState(effectiveUuid);
+          }
+        });
       } else {
         setIsRoomActiveInUrl(false);
         roomUuidRef.current = '';
@@ -261,7 +279,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   }, [isRoomActiveInUrl, roomId, roomUuid, getManager]);
 
   const refreshSavedRooms = useCallback(() => {
-    setSavedRooms(listRoomSnapshots());
+    void listRoomSnapshots().then(setSavedRooms);
   }, []);
 
   const ensureActiveRoom = useCallback(
@@ -326,10 +344,9 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   }, [updateProfile]);
 
   const setRoomId = useCallback((newRoomId: string, newRoomUuid?: string) => {
-    const uuid =
-      newRoomUuid ||
-      getStoredRoomUuid(newRoomId) ||
-      (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId());
+    const fallbackUuid =
+      typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId();
+    const uuid = newRoomUuid || fallbackUuid;
     roomIdRef.current = newRoomId;
     roomUuidRef.current = uuid;
     setRoomIdState(newRoomId);
@@ -337,6 +354,15 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     setIsRoomActiveInUrl(true);
     if (typeof window !== 'undefined') {
       window.location.hash = `room=${newRoomId}`;
+    }
+
+    if (!newRoomUuid) {
+      void getStoredRoomUuid(newRoomId).then((storedUuid) => {
+        if (storedUuid && roomIdRef.current === newRoomId) {
+          roomUuidRef.current = storedUuid;
+          setRoomUuidState(storedUuid);
+        }
+      });
     }
   }, []);
 
@@ -371,18 +397,19 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   const closeLoadModal = useCallback(() => setIsLoadModalOpen(false), []);
 
   const saveRoom = useCallback(
-    (
+    async (
       grid: PixelGrid,
       timestamps?: PixelTimestampTracker,
       targetRoomName?: string,
       targetRoomUuid?: string
-    ) => {
+    ): Promise<void> => {
       const activeRoomId = targetRoomName || roomIdRef.current || ensureActiveRoom(grid);
       const isTargetingCurrent = !targetRoomName || targetRoomName === roomIdRef.current;
+      const storedUuid = await getStoredRoomUuid(activeRoomId);
       const activeRoomUuid =
         targetRoomUuid ||
         (isTargetingCurrent ? roomUuidRef.current || roomUuid : null) ||
-        getStoredRoomUuid(activeRoomId) ||
+        storedUuid ||
         (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : generatePeerId());
 
       if (isTargetingCurrent && !roomUuidRef.current) {
@@ -390,7 +417,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         setRoomUuidState(activeRoomUuid);
       }
 
-      const existing = loadRoomSnapshot(activeRoomId);
+      const existing = await loadRoomSnapshot(activeRoomId);
       const pixelCount = grid.countOn();
 
       // Defer saving until something is actually drawn or modified
@@ -429,15 +456,16 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         pixelCount,
       };
 
-      saveRoomSnapshot(snapshot);
-      setSavedRooms(listRoomSnapshots());
+      await saveRoomSnapshot(snapshot);
+      const updatedList = await listRoomSnapshots();
+      setSavedRooms(updatedList);
     },
     [roomUuid, isRoomActiveInUrl, ensureActiveRoom]
   );
 
   const restoreRoom = useCallback(
-    (targetRoomName: string): RoomSnapshotData | null => {
-      const snapshot = loadRoomSnapshot(targetRoomName);
+    async (targetRoomName: string): Promise<RoomSnapshotData | null> => {
+      const snapshot = await loadRoomSnapshot(targetRoomName);
       if (!snapshot) return null;
 
       roomIdRef.current = snapshot.roomName;
@@ -458,11 +486,12 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
   );
 
   const copyRoomToNewSave = useCallback(
-    (sourceRoomName: string): RoomSnapshotData | null => {
-      const newSnapshot = forkRoomSnapshot(sourceRoomName, profile.name);
+    async (sourceRoomName: string): Promise<RoomSnapshotData | null> => {
+      const newSnapshot = await forkRoomSnapshot(sourceRoomName, profile.name);
       if (!newSnapshot) return null;
 
-      setSavedRooms(listRoomSnapshots());
+      const updatedList = await listRoomSnapshots();
+      setSavedRooms(updatedList);
 
       roomIdRef.current = newSnapshot.roomName;
       roomUuidRef.current = newSnapshot.roomUuid;
@@ -480,21 +509,24 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     [profile.name, options]
   );
 
-  const deleteRoom = useCallback((targetRoomName: string) => {
-    deleteRoomSnapshot(targetRoomName);
-    setSavedRooms(listRoomSnapshots());
+  const deleteRoom = useCallback(async (targetRoomName: string) => {
+    await deleteRoomSnapshot(targetRoomName);
+    const updatedList = await listRoomSnapshots();
+    setSavedRooms(updatedList);
   }, []);
 
-  const resolveConflictDiscardLocalAndJoin = useCallback(() => {
+  const resolveConflictDiscardLocalAndJoin = useCallback(async () => {
     if (!conflictInfo) return;
     const { roomName, remoteUuid, remotePeerId } = conflictInfo;
-    updateStoredRoomUuid(roomName, remoteUuid);
+    await updateStoredRoomUuid(roomName, remoteUuid);
     setRoomUuidState(remoteUuid);
     options?.onDiscardLocalConflict?.();
     const manager = getManager();
     manager.resolveConflictAdopt(remoteUuid, remotePeerId);
     setIsConflictModalOpen(false);
     setConflictInfo(null);
+    const updatedList = await listRoomSnapshots();
+    setSavedRooms(updatedList);
   }, [conflictInfo, getManager, options]);
 
   const resolveConflictKeepLocal = useCallback(() => {

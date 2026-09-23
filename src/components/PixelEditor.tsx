@@ -402,10 +402,11 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     if (typeof window === 'undefined' || !window.location?.hash) return;
     const match = window.location.hash.match(/#room=([a-zA-Z0-9_-]+)/);
     if (match && match[1]) {
-      const saved = loadRoomSnapshot(match[1]);
-      if (saved && saved.pixels.length > 0 && gridRef.current.countOn() === 0) {
-        handleRestoreSnapshot(saved);
-      }
+      void loadRoomSnapshot(match[1]).then((saved) => {
+        if (saved && saved.pixels.length > 0 && gridRef.current.countOn() === 0) {
+          handleRestoreSnapshot(saved);
+        }
+      });
     }
   }, [handleRestoreSnapshot]);
 
@@ -474,9 +475,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
   const handleNewCanvas = useCallback(() => {
     // 1. Snapshot/save the current room state into local save files if it had content or was saved before
-    if (gridRef.current.countOn() > 0 || loadRoomSnapshot(peerSession.roomId)) {
-      peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
-    }
+    void peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
 
     // 2. Reset the canvas to blank
     const blankGrid = new PixelGrid(
@@ -505,10 +504,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const handleLoadRoom = useCallback(
     (roomName: string) => {
       // Snapshot current work before switching if it had content or was saved before
-      if (gridRef.current.countOn() > 0 || loadRoomSnapshot(peerSession.roomId)) {
-        peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
-      }
-      peerSession.restoreRoom(roomName);
+      void peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
+      void peerSession.restoreRoom(roomName);
       peerSession.closeLoadModal();
       peerSession.closeShareModal();
     },
@@ -518,10 +515,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const handleCopyToNewSave = useCallback(
     (roomName: string) => {
       // Snapshot current work before switching if it had content or was saved before
-      if (gridRef.current.countOn() > 0 || loadRoomSnapshot(peerSession.roomId)) {
-        peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
-      }
-      peerSession.copyRoomToNewSave(roomName);
+      void peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
+      void peerSession.copyRoomToNewSave(roomName);
       peerSession.closeLoadModal();
       peerSession.closeShareModal();
     },
@@ -1631,7 +1626,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onDeleteRoom={peerSession.deleteRoom}
       />
 
-      {/* Saved Rooms / Storage Modal */}
+      {/* Saved Rooms / Storage Modal with Import & Export */}
       <RoomStorageModal
         isOpen={peerSession.isLoadModalOpen}
         onClose={peerSession.closeLoadModal}
@@ -1641,6 +1636,14 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onLoadRoom={handleLoadRoom}
         onCopyToNewSave={handleCopyToNewSave}
         onDeleteRoom={peerSession.deleteRoom}
+        onOpenImportModal={handleOpenImportDialog}
+        onExportPNG={handleExportPNG}
+        onExportCArray={handleExportCArray}
+        onExportJSON={handleExportJSON}
+        onSaveJSONFile={handleSaveJSONFile}
+        onDownloadCHeader={handleDownloadCHeader}
+        selectionBounds={selection && selection.active ? { width: selection.w, height: selection.h } : null}
+        canvasDimensions={{ width: grid.width, height: grid.height }}
       />
 
       {/* Room ID Conflict Resolution Modal */}

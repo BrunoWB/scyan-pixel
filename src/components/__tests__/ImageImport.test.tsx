@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { renderToString } from 'react-dom/server';
 import { ImageImportModal } from '../ImageImportModal';
 import { EditorHeader } from '../editor/ui/EditorHeader';
+import { RoomStorageModal } from '../editor/ui/RoomStorageModal';
 import { PixelEditor as BwpxEditor } from '../PixelEditor';
 
 describe('ImageImportModal', () => {
@@ -79,9 +80,29 @@ describe('BwpxEditor file input', () => {
   });
 });
 
-describe('EditorHeader import button', () => {
-  it('renders import button with title', () => {
+describe('EditorHeader & RoomStorageModal import integration', () => {
+  it('renders RoomStorageModal with Import option when import tab is active', () => {
     const onOpenImportModal = vi.fn();
+    const html = renderToString(
+      <RoomStorageModal
+        isOpen={true}
+        onClose={() => {}}
+        savedRooms={[]}
+        currentRoomId="default"
+        onLoadRoom={() => {}}
+        onCopyToNewSave={() => {}}
+        onDeleteRoom={() => {}}
+        initialTab="import"
+        onOpenImportModal={onOpenImportModal}
+      />
+    );
+
+    expect(html).toContain('Import Raster Art or Animation');
+    expect(html).toContain('Choose Image or GIF...');
+  });
+
+  it('renders Load button in EditorHeader that opens room storage modal', () => {
+    const onOpenLoadModal = vi.fn();
     const html = renderToString(
       <EditorHeader
         isHeaderHovered={false}
@@ -106,15 +127,16 @@ describe('EditorHeader import button', () => {
         activeBgColor="#12141a"
         onBgColorChange={() => {}}
         onOpenCanvasEyedropper={() => {}}
-        onOpenImportModal={onOpenImportModal}
+        onOpenImportModal={() => {}}
         onExportPNG={() => {}}
         onExportCArray={() => {}}
         onExportJSON={() => {}}
+        onOpenLoadModal={onOpenLoadModal}
       />
     );
 
-    expect(html).toContain('Import Image (PNG, JPG, BMP, GIF)');
-    expect(html).toContain('Import');
+    expect(html).toContain('Load');
+    expect(html).toContain('aria-label="Load Saved Room, Import and Export"');
   });
 });
 
