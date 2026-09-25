@@ -318,7 +318,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
   const [brushSize, setBrushSize] = useState<number>(1);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
-  const [drawButton, setDrawButton] = useState<number>(0);
+  const drawButtonRef = useRef<number>(0);
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null);
   const [ghost, setGhost] = useState<GhostOverlay | null>(null);
   const [ghostPlacement, setGhostPlacement] = useState<{
@@ -521,36 +521,65 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     }
   };
 
+  // Base Canvas rendering with live stroke decoupling support
+  const baseRafRef = useRef<number | null>(null);
+
+  const renderBase = useCallback(
+    (overrideGrid?: BwpxGrid) => {
+      const canvas = baseCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const container = containerRef.current;
+      if (container) {
+        if (canvas.width !== container.clientWidth || canvas.height !== container.clientHeight) {
+          canvas.width = container.clientWidth;
+          canvas.height = container.clientHeight;
+        }
+      }
+
+      renderBaseCanvas(canvas, ctx, {
+        grid: overrideGrid ?? strokeGridRef.current ?? grid,
+        zoom,
+        pan,
+        pixelColor: activePixelColor,
+        monochrome: isStrictMonochrome,
+        bgColor: activeBgColor,
+        showGridLines: zoom >= 4,
+        showAxes: true,
+        frameBounds: null,
+        slices,
+        selectedSliceId,
+        selectedSliceIds,
+      });
+    },
+    [grid, zoom, pan, activePixelColor, activeBgColor, isStrictMonochrome, slices, selectedSliceId, selectedSliceIds]
+  );
+
+  const scheduleStrokeRender = useCallback(() => {
+    if (baseRafRef.current !== null) {
+      cancelAnimationFrame(baseRafRef.current);
+    }
+    baseRafRef.current = requestAnimationFrame(() => {
+      baseRafRef.current = null;
+      renderBase();
+    });
+  }, [renderBase]);
+
   // Redraw Base Canvas when grid, zoom, pan, colors, or slices change
   useEffect(() => {
-    const canvas = baseCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    renderBase();
+  }, [renderBase]);
 
-    const container = containerRef.current;
-    if (container) {
-      if (canvas.width !== container.clientWidth || canvas.height !== container.clientHeight) {
-        canvas.width = container.clientWidth;
-        canvas.height = container.clientHeight;
+  useEffect(() => {
+    return () => {
+      if (baseRafRef.current !== null) {
+        cancelAnimationFrame(baseRafRef.current);
+        baseRafRef.current = null;
       }
-    }
-
-    renderBaseCanvas(canvas, ctx, {
-      grid,
-      zoom,
-      pan,
-      pixelColor: activePixelColor,
-      monochrome: isStrictMonochrome,
-      bgColor: activeBgColor,
-      showGridLines: zoom >= 4,
-      showAxes: true,
-      frameBounds: null,
-      slices,
-      selectedSliceId,
-      selectedSliceIds,
-    });
-  }, [grid, zoom, pan, activePixelColor, activeBgColor, isStrictMonochrome, slices, selectedSliceId, selectedSliceIds]);
+    };
+  }, []);
 
   // Redraw Overlay Canvas on ephemeral interaction changes via rAF
   const scheduleOverlayRender = useCallback(() => {
@@ -968,17 +997,15 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
         drawBrushDot(next, x, y, 0, brushSize, undefined, isRound);
         setIsDrawing(true);
         isDrawingRef.current = true;
-        setDrawButton(2);
+        drawButtonRef.current = 2;
         setStartPos(coords);
         startPosRef.current = coords;
         currentCoordsRef.current = coords;
         strokeGridRef.current = next;
-        gridRef.current = next;
-        commitGrid(next);
         const now = Date.now();
         pixelTimestampsRef.current.set(x, y, now);
         collaboration?.broadcastPixels?.(getBrushDotPixels(x, y, brushSize, null, now, isRound));
-        collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
+        scheduleStrokeRender();
         return;
       }
       setContextMenu({ x: e.clientX, y: e.clientY });
@@ -998,7 +1025,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     setStartPos(coords);
     startPosRef.current = coords;
     currentCoordsRef.current = coords;
-    setDrawButton(0);
+    drawButtonRef.current = 0;
 
     // Eyedropper tool or Alt+Click color sampling
     if (activeTool === 'eyedropper' || e.altKey) {
@@ -1133,15 +1160,13 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
       setIsDrawing(true);
       isDrawingRef.current = true;
       strokeGridRef.current = next;
-      gridRef.current = next;
-      commitGrid(next);
       const now = Date.now();
       pixelTimestampsRef.current.set(x, y, now);
       collaboration?.broadcastPixels?.(
         getBrushDotPixels(x, y, brushSize, val === 0 ? null : activeDrawColor, now, isRound)
       );
-      collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
       if (val === 1) recentPaletteRef.current?.pushColor(activeDrawColor);
+      scheduleStrokeRender();
       return;
     }
 
@@ -1158,7 +1183,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     }
 
     const coords = getGridCoords(e.clientX, e.clientY);
-    setHoverPos(coords);
+    setHoverPos((prev) => (prev && prev.x === coords.x && prev.y === coords.y ? prev : coords));
     currentCoordsRef.current = coords;
 
     if (ghostPlacementRef.current) {
@@ -1185,12 +1210,12 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
       return;
     }
 
-    if (!isDrawing || !startPos) return;
+    if ((!isDrawing && !isDrawingRef.current) || (!startPos && !startPosRef.current)) return;
 
     if (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser') {
       const prevCoords = startPosRef.current;
       if (strokeGridRef.current && prevCoords) {
-        const val = drawButton === 2 || activeTool === 'eraser' ? 0 : 1;
+        const val = drawButtonRef.current === 2 || activeTool === 'eraser' ? 0 : 1;
         const isRound = activeTool === 'round-pencil';
         if (prevCoords.x !== coords.x || prevCoords.y !== coords.y) {
           drawLine(
@@ -1220,16 +1245,17 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
           }
           collaboration?.broadcastPixels?.(linePixels);
           startPosRef.current = coords;
-          setStartPos(coords);
-          gridRef.current = strokeGridRef.current;
-          setGrid(strokeGridRef.current);
+          scheduleStrokeRender();
         }
       }
       return;
     }
 
+    const activeStartPos = startPos || startPosRef.current;
+    if (!activeStartPos) return;
+
     if (activeTool === 'select') {
-      const endpoints = calculateShapeEndpoints('select', startPos, coords, {
+      const endpoints = calculateShapeEndpoints('select', activeStartPos, coords, {
         shiftKey: e.shiftKey,
         ctrlKey: e.ctrlKey || e.metaKey,
       });
@@ -1248,7 +1274,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     }
 
     if (isShapeTool(activeTool)) {
-      updateShapePreview(startPos, coords, {
+      updateShapePreview(activeStartPos, coords, {
         shiftKey: e.shiftKey,
         ctrlKey: e.ctrlKey || e.metaKey,
       });
@@ -1339,17 +1365,20 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
       return;
     }
 
-    if (activeTool === 'select' && startPos) {
-      const hasDragged = Math.abs(coords.x - startPos.x) > 0 || Math.abs(coords.y - startPos.y) > 0;
+    const selectStart = startPos || startPosRef.current;
+    if (activeTool === 'select' && selectStart) {
+      const hasDragged = Math.abs(coords.x - selectStart.x) > 0 || Math.abs(coords.y - selectStart.y) > 0;
+      drawButtonRef.current = 0;
       setIsDrawing(false);
       isDrawingRef.current = false;
       startPosRef.current = null;
+      setStartPos(null);
       strokeGridRef.current = null;
       setGhost(null);
 
       if (!hasDragged) {
         const clickedSlice = slicesRef.current?.find(
-          (s) => startPos.x >= s.x && startPos.x < s.x + s.width && startPos.y >= s.y && startPos.y < s.y + s.height
+          (s) => selectStart.x >= s.x && selectStart.x < s.x + s.width && selectStart.y >= s.y && selectStart.y < s.y + s.height
         );
         if (clickedSlice) {
           const isMulti = Boolean(e.ctrlKey || e.metaKey);
@@ -1374,10 +1403,10 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
           return;
         }
       } else {
-        const minX = Math.min(startPos.x, coords.x);
-        const minY = Math.min(startPos.y, coords.y);
-        const w = Math.abs(coords.x - startPos.x) + 1;
-        const h = Math.abs(coords.y - startPos.y) + 1;
+        const minX = Math.min(selectStart.x, coords.x);
+        const minY = Math.min(selectStart.y, coords.y);
+        const w = Math.abs(coords.x - selectStart.x) + 1;
+        const h = Math.abs(coords.y - selectStart.y) + 1;
 
         const zoneSlices = (slicesRef.current || []).filter(
           (s) => s.x < minX + w && s.x + s.width > minX && s.y < minY + h && s.y + s.height > minY
@@ -1413,28 +1442,46 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
       }
     }
 
-    if (!isDrawing || !startPos) {
+    if (strokeGridRef.current && (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser')) {
+      const finalGrid = strokeGridRef.current;
+      strokeGridRef.current = null;
+      drawButtonRef.current = 0;
       setIsDrawing(false);
       isDrawingRef.current = false;
       startPosRef.current = null;
+      setStartPos(null);
+      setGhost(null);
+      if (baseRafRef.current !== null) {
+        cancelAnimationFrame(baseRafRef.current);
+        baseRafRef.current = null;
+      }
+      renderBase(finalGrid);
+      commitAndBroadcast(finalGrid);
+      return;
+    }
+
+    if (!isDrawing && !isDrawingRef.current) {
+      drawButtonRef.current = 0;
+      setIsDrawing(false);
+      isDrawingRef.current = false;
+      startPosRef.current = null;
+      setStartPos(null);
       strokeGridRef.current = null;
       return;
     }
 
+    const currentStart = startPos || startPosRef.current;
+    drawButtonRef.current = 0;
     setIsDrawing(false);
     isDrawingRef.current = false;
     startPosRef.current = null;
+    setStartPos(null);
     strokeGridRef.current = null;
     setGhost(null);
 
-    if (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser') {
-      collaboration?.saveRoom?.(gridRef.current, pixelTimestampsRef.current);
-      return;
-    }
-
     // Finalize shape
-    if (isShapeTool(activeTool)) {
-      const endpoints = calculateShapeEndpoints(activeTool, startPos, coords, {
+    if (isShapeTool(activeTool) && currentStart) {
+      const endpoints = calculateShapeEndpoints(activeTool, currentStart, coords, {
         shiftKey: e.shiftKey,
         ctrlKey: e.ctrlKey || e.metaKey,
       });
@@ -1454,6 +1501,34 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
       recentPaletteRef.current?.pushColor(activeDrawColor);
     }
   };
+
+  const handleMouseLeave = useCallback(() => {
+    setHoverPos(null);
+    drawButtonRef.current = 0;
+    if (strokeGridRef.current && (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser')) {
+      const finalGrid = strokeGridRef.current;
+      strokeGridRef.current = null;
+      setIsDrawing(false);
+      isDrawingRef.current = false;
+      startPosRef.current = null;
+      setStartPos(null);
+      setGhost(null);
+      if (baseRafRef.current !== null) {
+        cancelAnimationFrame(baseRafRef.current);
+        baseRafRef.current = null;
+      }
+      renderBase(finalGrid);
+      commitAndBroadcast(finalGrid);
+    } else {
+      setIsDrawing(false);
+      isDrawingRef.current = false;
+      startPosRef.current = null;
+      setStartPos(null);
+      strokeGridRef.current = null;
+      setGhost(null);
+    }
+    setIsPanning(false);
+  }, [activeTool, commitAndBroadcast, renderBase, setIsPanning]);
 
   // Image Import Handler
   const handleImageImportConfirm = (
@@ -1936,15 +2011,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
-          onMouseLeave={() => {
-            setHoverPos(null);
-            setIsDrawing(false);
-            isDrawingRef.current = false;
-            startPosRef.current = null;
-            strokeGridRef.current = null;
-            setIsPanning(false);
-            setGhost(null);
-          }}
+          onMouseLeave={handleMouseLeave}
           onWheel={handleWheel}
         />
 
