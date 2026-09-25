@@ -1,17 +1,37 @@
 import { BwpxGrid } from "./PixelGrid";
 
+export function isPixelInBrush(
+  dx: number,
+  dy: number,
+  brushSize: number,
+  isRound = false
+): boolean {
+  if (!isRound || brushSize <= 2) return true;
+  const c = (brushSize - 1) / 2;
+  const ox = dx - c;
+  const oy = dy - c;
+  const distSq = ox * ox + oy * oy;
+  const maxRadiusSq = brushSize % 2 === 1
+    ? (brushSize / 2) ** 2 - 0.5
+    : (brushSize / 2) ** 2;
+  return distSq <= maxRadiusSq;
+}
+
 export function drawBrushDot(
   grid: BwpxGrid,
   cx: number,
   cy: number,
   val: number | string = 1,
   brushSize = 1,
-  color?: string
+  color?: string,
+  isRound = false
 ): void {
   const half = Math.floor(brushSize / 2);
   for (let dy = 0; dy < brushSize; dy++) {
     for (let dx = 0; dx < brushSize; dx++) {
-      grid.set(cx - half + dx, cy - half + dy, val, color);
+      if (isPixelInBrush(dx, dy, brushSize, isRound)) {
+        grid.set(cx - half + dx, cy - half + dy, val, color);
+      }
     }
   }
 }
@@ -24,7 +44,8 @@ export function drawLine(
   y1: number,
   val: number | string = 1,
   brushSize = 1,
-  color?: string
+  color?: string,
+  isRound = false
 ): void {
   let dx = Math.abs(x1 - x0);
   let dy = Math.abs(y1 - y0);
@@ -36,7 +57,7 @@ export function drawLine(
   let curY = y0;
 
   while (true) {
-    drawBrushDot(grid, curX, curY, val, brushSize, color);
+    drawBrushDot(grid, curX, curY, val, brushSize, color, isRound);
     if (curX === x1 && curY === y1) break;
     let e2 = 2 * err;
     if (e2 > -dy) {
@@ -437,15 +458,29 @@ export function drawPlus(
   drawLine(grid, cx, minY, cx, maxY, val, brushSize, color);
 }
 
+export interface FloodFillOptions {
+  selection?: { x: number; y: number; w: number; h: number } | null;
+  bounds?: { minX: number; minY: number; maxX: number; maxY: number };
+  maxPixels?: number;
+}
+
+export interface FloodFillResult {
+  filled: boolean;
+  pixelCount: number;
+  reason?: 'unbounded_void' | 'no_change' | 'out_of_bounds';
+}
+
 export function floodFill(
   grid: BwpxGrid,
   startX: number,
   startY: number,
   newVal: number | string = 1,
   newColor?: string,
-  maxPixels = 50000
-): void {
-  if (!grid.inBounds(startX, startY)) return;
+  optionsOrMaxPixels?: number | FloodFillOptions
+): FloodFillResult {
+  if (!grid.inBounds(startX, startY)) {
+    return { filled: false, pixelCount: 0, reason: 'out_of_bounds' };
+  }
 
   const targetVal = grid.get(startX, startY);
   const targetColor = grid.getColor(startX, startY);
@@ -455,29 +490,89 @@ export function floodFill(
 
   // If erasing to 0
   if (fillVal === 0) {
-    if (targetVal === 0) return;
+    if (targetVal === 0) {
+      return { filled: false, pixelCount: 0, reason: 'no_change' };
+    }
   } else {
     // If filling with color
     if (targetVal === 1 && targetColor?.toLowerCase() === fillColor?.toLowerCase()) {
-      return;
+      return { filled: false, pixelCount: 0, reason: 'no_change' };
+    }
+  }
+
+  const options: FloodFillOptions =
+    typeof optionsOrMaxPixels === 'number'
+      ? { maxPixels: optionsOrMaxPixels }
+      : optionsOrMaxPixels || {};
+  const maxPixels = options.maxPixels ?? 50000;
+  const selection =
+    options.selection && options.selection.w > 0 && options.selection.h > 0
+      ? options.selection
+      : null;
+
+  // When targetVal === 0 (filling empty void/background):
+  // Must be strictly bounded by an active selection OR an enclosed boundary of drawn pixels!
+  let minAllowedX = -Infinity;
+  let maxAllowedX = Infinity;
+  let minAllowedY = -Infinity;
+  let maxAllowedY = Infinity;
+
+  if (targetVal === 0) {
+    if (selection) {
+      // Must start within the selection
+      if (
+        startX < selection.x ||
+        startX >= selection.x + selection.w ||
+        startY < selection.y ||
+        startY >= selection.y + selection.h
+      ) {
+        return { filled: false, pixelCount: 0, reason: 'unbounded_void' };
+      }
+      minAllowedX = selection.x;
+      maxAllowedX = selection.x + selection.w - 1;
+      minAllowedY = selection.y;
+      maxAllowedY = selection.y + selection.h - 1;
+    } else {
+      // No selection: check existing drawn bounds
+      const bounds = grid.getBounds();
+      // If there are no drawn pixels, the whole canvas is unbounded void!
+      if (bounds.width === 0 || bounds.height === 0) {
+        return { filled: false, pixelCount: 0, reason: 'unbounded_void' };
+      }
+      // If clicked outside all drawn pixels, it is directly in the void
+      if (
+        startX < bounds.minX ||
+        startX > bounds.maxX ||
+        startY < bounds.minY ||
+        startY > bounds.maxY
+      ) {
+        return { filled: false, pixelCount: 0, reason: 'unbounded_void' };
+      }
+      minAllowedX = bounds.minX;
+      maxAllowedX = bounds.maxX;
+      minAllowedY = bounds.minY;
+      maxAllowedY = bounds.maxY;
     }
   }
 
   const visited = new Set<string>();
   const queue: [number, number][] = [[startX, startY]];
   visited.add(`${startX},${startY}`);
-  let count = 0;
-
-  // Coordinate bounding limit when filling empty space on infinite grid
-  const bounds = grid.getBounds();
-  const minAllowedX = bounds.width > 0 ? bounds.minX - 64 : startX - 64;
-  const maxAllowedX = bounds.width > 0 ? bounds.maxX + 64 : startX + 64;
-  const minAllowedY = bounds.height > 0 ? bounds.minY - 64 : startY - 64;
-  const maxAllowedY = bounds.height > 0 ? bounds.maxY + 64 : startY + 64;
+  const toFill: [number, number][] = [];
 
   while (queue.length > 0) {
-    if (++count > maxPixels) break;
+    if (toFill.length > maxPixels) {
+      return { filled: false, pixelCount: 0, reason: 'unbounded_void' };
+    }
     const [x, y] = queue.pop()!;
+
+    // When targetVal === 0 without selection, if traversal reaches outside drawn bounds,
+    // it means the empty space is not enclosed and leaked into the open void!
+    if (targetVal === 0 && !selection) {
+      if (x < minAllowedX || x > maxAllowedX || y < minAllowedY || y > maxAllowedY) {
+        return { filled: false, pixelCount: 0, reason: 'unbounded_void' };
+      }
+    }
 
     const curVal = grid.get(x, y);
     const curColor = grid.getColor(x, y);
@@ -488,11 +583,7 @@ export function floodFill(
         : curVal === 1 && (targetColor === null || curColor === targetColor);
 
     if (matches) {
-      if (fillVal === 0) {
-        grid.set(x, y, 0);
-      } else {
-        grid.set(x, y, 1, fillColor);
-      }
+      toFill.push([x, y]);
 
       const neighbors: [number, number][] = [
         [x - 1, y],
@@ -503,8 +594,11 @@ export function floodFill(
 
       for (const [nx, ny] of neighbors) {
         if (targetVal === 0) {
-          if (nx < minAllowedX || nx > maxAllowedX || ny < minAllowedY || ny > maxAllowedY) {
-            continue;
+          if (selection) {
+            // Respect selection boundary walls
+            if (nx < minAllowedX || nx > maxAllowedX || ny < minAllowedY || ny > maxAllowedY) {
+              continue;
+            }
           }
         }
         const key = `${nx},${ny}`;
@@ -515,6 +609,17 @@ export function floodFill(
       }
     }
   }
+
+  // Entire search completed within boundary without leaking into void
+  for (const [fx, fy] of toFill) {
+    if (fillVal === 0) {
+      grid.set(fx, fy, 0);
+    } else {
+      grid.set(fx, fy, 1, fillColor);
+    }
+  }
+
+  return { filled: true, pixelCount: toFill.length };
 }
 
 export const SHAPE_TOOLS = [

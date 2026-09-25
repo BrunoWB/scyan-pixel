@@ -52,6 +52,7 @@ export interface RenderOverlayOptions {
   hoverHighlightColor?: string;
   brushIndicatorColor?: string;
   brushSize?: number;
+  brushShape?: 'square' | 'circle';
   showBrushIndicator?: boolean;
   frameBounds?: { x: number; y: number; w: number; h: number } | null;
   ghost?: GhostOverlay | null;
@@ -67,6 +68,7 @@ export interface RenderBwpxOptions extends RenderBaseOptions {
   hoverHighlightColor?: string;
   brushIndicatorColor?: string;
   brushSize?: number;
+  brushShape?: 'square' | 'circle';
   showBrushIndicator?: boolean;
 }
 
@@ -263,6 +265,7 @@ export function renderOverlayCanvas(
     hoverHighlightColor = 'rgba(255, 255, 255, 0.04)',
     brushIndicatorColor = 'rgba(0, 229, 163, 0.8)',
     brushSize = 1,
+    brushShape = 'square',
     showBrushIndicator = false,
     frameBounds = null,
     ghost = null,
@@ -406,7 +409,13 @@ export function renderOverlayCanvas(
     const by = Math.round((hoverPos.y - half) * zoom);
     const bw = Math.round((hoverPos.x - half + brushSize) * zoom) - bx;
     const bh = Math.round((hoverPos.y - half + brushSize) * zoom) - by;
-    ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+    if (brushShape === 'circle' && brushSize >= 3) {
+      ctx.beginPath();
+      ctx.ellipse(bx + bw / 2, by + bh / 2, bw / 2, bh / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+    }
   }
 
   ctx.restore();

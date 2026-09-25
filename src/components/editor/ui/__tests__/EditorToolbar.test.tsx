@@ -219,5 +219,33 @@ describe('ShapeToolButton', () => {
     expect(html).toContain('data-testid="line-tool"');
     expect(html).toContain('background-color:#00e5a3');
   });
+
+  it('renders pencil multi-variant button with round brush default', () => {
+    const html = renderToString(
+      <EditorToolbar
+        activeTool="round-pencil"
+        setActiveTool={() => {}}
+        activeDrawColor="#00e5a3"
+        activePixelColor="#00e5a3"
+      />
+    );
+
+    expect(html).toContain('Round Brush (B/P)');
+    expect(html).toContain('background-color:#00e5a3');
+  });
+
+  it('highlights pencil button when square pencil is active', () => {
+    const html = renderToString(
+      <EditorToolbar
+        activeTool="pencil"
+        setActiveTool={() => {}}
+        activeDrawColor="#ff004d"
+        activePixelColor="#00e5a3"
+      />
+    );
+
+    expect(html).toContain('Square Pencil (B/P)');
+    expect(html).toContain('background-color:#ff004d');
+  });
 });
 

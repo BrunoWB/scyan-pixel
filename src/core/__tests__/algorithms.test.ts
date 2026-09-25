@@ -8,6 +8,8 @@ import {
   drawShape,
   isShapeTool,
   SHAPE_TOOLS,
+  floodFill,
+  isPixelInBrush,
 } from '../algorithms';
 
 describe('algorithms', () => {
@@ -353,6 +355,152 @@ describe('algorithms', () => {
       for (let x = 0; x <= 4; x++) {
         expect(grid.get(x, 0)).toBe(1);
       }
+    });
+  });
+
+  describe('isPixelInBrush & Round Brush', () => {
+    it('isPixelInBrush produces round pixel footprint for brush sizes 1..5', () => {
+      // Size 1: 1 pixel
+      expect(isPixelInBrush(0, 0, 1, true)).toBe(true);
+
+      // Size 2: 4 pixels
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          expect(isPixelInBrush(dx, dy, 2, true)).toBe(true);
+        }
+      }
+
+      // Size 3: cross shape (5 pixels), corners excluded
+      let count3 = 0;
+      for (let dy = 0; dy < 3; dy++) {
+        for (let dx = 0; dx < 3; dx++) {
+          if (isPixelInBrush(dx, dy, 3, true)) count3++;
+        }
+      }
+      expect(count3).toBe(5);
+      expect(isPixelInBrush(0, 0, 3, true)).toBe(false); // Top-left corner excluded
+      expect(isPixelInBrush(2, 0, 3, true)).toBe(false); // Top-right corner excluded
+      expect(isPixelInBrush(0, 2, 3, true)).toBe(false); // Bottom-left corner excluded
+      expect(isPixelInBrush(2, 2, 3, true)).toBe(false); // Bottom-right corner excluded
+      expect(isPixelInBrush(1, 1, 3, true)).toBe(true);  // Center included
+      expect(isPixelInBrush(1, 0, 3, true)).toBe(true);  // Top edge included
+
+      // Size 4: 12 pixels (4 corners excluded)
+      let count4 = 0;
+      for (let dy = 0; dy < 4; dy++) {
+        for (let dx = 0; dx < 4; dx++) {
+          if (isPixelInBrush(dx, dy, 4, true)) count4++;
+        }
+      }
+      expect(count4).toBe(12);
+
+      // Size 5: 21 pixels (4 corners excluded)
+      let count5 = 0;
+      for (let dy = 0; dy < 5; dy++) {
+        for (let dx = 0; dx < 5; dx++) {
+          if (isPixelInBrush(dx, dy, 5, true)) count5++;
+        }
+      }
+      expect(count5).toBe(21);
+    });
+
+    it('draws circular dot when isRound is true', () => {
+      const grid = new BwpxGrid(10, 10);
+      drawBrushDot(grid, 5, 5, 1, 3, undefined, true);
+      expect(grid.countOn()).toBe(5);
+      expect(grid.get(5, 5)).toBe(1); // center
+      expect(grid.get(5, 4)).toBe(1); // top
+      expect(grid.get(5, 6)).toBe(1); // bottom
+      expect(grid.get(4, 5)).toBe(1); // left
+      expect(grid.get(6, 5)).toBe(1); // right
+      expect(grid.get(4, 4)).toBe(0); // corner
+      expect(grid.get(6, 4)).toBe(0); // corner
+    });
+  });
+
+  describe('floodFill bounded void limits', () => {
+    it('refuses to fill on empty grid without enclosed boundary or selection', () => {
+      const grid = new BwpxGrid(20, 20);
+      const res = floodFill(grid, 10, 10, 1, '#00e5a3');
+      expect(res.filled).toBe(false);
+      expect(res.reason).toBe('unbounded_void');
+      expect(grid.countOn()).toBe(0);
+    });
+
+    it('refuses to fill when clicking outside drawn boundary into the void', () => {
+      const grid = new BwpxGrid(30, 30);
+      // Draw an enclosed 10x10 square at (5,5) to (14,14)
+      for (let x = 5; x <= 14; x++) {
+        grid.set(x, 5, 1);
+        grid.set(x, 14, 1);
+      }
+      for (let y = 5; y <= 14; y++) {
+        grid.set(5, y, 1);
+        grid.set(14, y, 1);
+      }
+
+      // Click outside at (25, 25)
+      const res = floodFill(grid, 25, 25, 1, '#00e5a3');
+      expect(res.filled).toBe(false);
+      expect(res.reason).toBe('unbounded_void');
+    });
+
+    it('successfully fills inside an enclosed shape', () => {
+      const grid = new BwpxGrid(20, 20);
+      // Draw an enclosed 6x6 square from (5,5) to (10,10)
+      for (let x = 5; x <= 10; x++) {
+        grid.set(x, 5, 1);
+        grid.set(x, 10, 1);
+      }
+      for (let y = 5; y <= 10; y++) {
+        grid.set(5, y, 1);
+        grid.set(10, y, 1);
+      }
+      const initialBorderPixels = grid.countOn();
+
+      // Click inside at (7, 7)
+      const res = floodFill(grid, 7, 7, 1, '#00e5a3');
+      expect(res.filled).toBe(true);
+      expect(res.pixelCount).toBe(16); // 4x4 interior
+      expect(grid.countOn()).toBe(initialBorderPixels + 16);
+      expect(grid.get(7, 7)).toBe(1);
+    });
+
+    it('aborts without mutating grid when shape has a hole leaking to the void', () => {
+      const grid = new BwpxGrid(20, 20);
+      // Draw a square with a gap in the right wall at (10, 7)
+      for (let x = 5; x <= 10; x++) {
+        grid.set(x, 5, 1);
+        grid.set(x, 10, 1);
+      }
+      for (let y = 5; y <= 10; y++) {
+        if (y !== 7) {
+          grid.set(5, y, 1);
+          grid.set(10, y, 1);
+        }
+      }
+      const beforeCount = grid.countOn();
+
+      // Click inside: leaks through (10, 7) into void
+      const res = floodFill(grid, 7, 7, 1, '#00e5a3');
+      expect(res.filled).toBe(false);
+      expect(res.reason).toBe('unbounded_void');
+      // Must not modify a single pixel!
+      expect(grid.countOn()).toBe(beforeCount);
+      expect(grid.get(7, 7)).toBe(0);
+    });
+
+    it('fills empty area when bounded by an active selection', () => {
+      const grid = new BwpxGrid(20, 20);
+      const res = floodFill(grid, 5, 5, 1, '#00e5a3', {
+        selection: { x: 4, y: 4, w: 5, h: 5 },
+      });
+      expect(res.filled).toBe(true);
+      expect(res.pixelCount).toBe(25);
+      expect(grid.countOn()).toBe(25);
+      expect(grid.get(4, 4)).toBe(1);
+      expect(grid.get(8, 8)).toBe(1);
+      expect(grid.get(9, 9)).toBe(0);
     });
   });
 });

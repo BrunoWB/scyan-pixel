@@ -1,4 +1,5 @@
 import { PixelGrid, packCoord } from './PixelGrid';
+import { isPixelInBrush } from './algorithms';
 
 export type PixelDelta =
   | [x: number, y: number, color: string | null]
@@ -215,18 +216,21 @@ export function getBrushDotPixels(
   cy: number,
   brushSize = 1,
   color: string | null = null,
-  timestamp?: number
+  timestamp?: number,
+  isRound = false
 ): PixelDelta[] {
   const pixels: PixelDelta[] = [];
   const half = Math.floor(brushSize / 2);
   for (let dy = 0; dy < brushSize; dy++) {
     for (let dx = 0; dx < brushSize; dx++) {
-      const px = cx - half + dx;
-      const py = cy - half + dy;
-      if (timestamp !== undefined) {
-        pixels.push([px, py, color, timestamp]);
-      } else {
-        pixels.push([px, py, color]);
+      if (isPixelInBrush(dx, dy, brushSize, isRound)) {
+        const px = cx - half + dx;
+        const py = cy - half + dy;
+        if (timestamp !== undefined) {
+          pixels.push([px, py, color, timestamp]);
+        } else {
+          pixels.push([px, py, color]);
+        }
       }
     }
   }
@@ -243,7 +247,8 @@ export function getLinePixels(
   y1: number,
   brushSize = 1,
   color: string | null = null,
-  timestamp?: number
+  timestamp?: number,
+  isRound = false
 ): PixelDelta[] {
   const pixels: PixelDelta[] = [];
   const seen = new Set<number>();
@@ -260,15 +265,17 @@ export function getLinePixels(
   while (true) {
     for (let bdy = 0; bdy < brushSize; bdy++) {
       for (let bdx = 0; bdx < brushSize; bdx++) {
-        const px = curX - half + bdx;
-        const py = curY - half + bdy;
-        const key = packCoord(px, py);
-        if (!seen.has(key)) {
-          seen.add(key);
-          if (timestamp !== undefined) {
-            pixels.push([px, py, color, timestamp]);
-          } else {
-            pixels.push([px, py, color]);
+        if (isPixelInBrush(bdx, bdy, brushSize, isRound)) {
+          const px = curX - half + bdx;
+          const py = curY - half + bdy;
+          const key = packCoord(px, py);
+          if (!seen.has(key)) {
+            seen.add(key);
+            if (timestamp !== undefined) {
+              pixels.push([px, py, color, timestamp]);
+            } else {
+              pixels.push([px, py, color]);
+            }
           }
         }
       }

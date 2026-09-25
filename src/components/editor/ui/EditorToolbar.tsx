@@ -4,6 +4,7 @@ import { getContrastColor } from '../../../core/colorUtils';
 import { ShapeToolButton } from './ShapeToolButton';
 import {
   Pencil,
+  Brush,
   Eraser,
   PaintBucket,
   MousePointer2,
@@ -54,21 +55,25 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       <div className="flex flex-col items-center gap-1 w-full px-1.5">
         <span className="text-[8px] font-bold tracking-wider text-slate-600 mb-0.5">DRAW</span>
 
-        <button
-          onClick={() => setActiveTool('pencil')}
-          className={`w-8 h-8 rounded flex items-center justify-center transition cursor-pointer ${
-            activeTool === 'pencil'
-              ? 'shadow-md ring-1 ring-white/30'
-              : 'text-slate-400 hover:bg-[#202530] hover:text-white'
-          }`}
-          style={{
-            backgroundColor: activeTool === 'pencil' ? activeDrawColor : 'transparent',
-            color: activeTool === 'pencil' ? getContrastColor(activeDrawColor) : undefined,
-          }}
-          title="Pencil (B/P) - Left click draws, Right click erases, Alt+Click picks color"
-        >
-          <Pencil className="w-3.5 h-3.5" />
-        </button>
+        <ShapeToolButton
+          variants={[
+            {
+              tool: 'round-pencil',
+              icon: <Brush className="w-3.5 h-3.5" />,
+              title: 'Round Brush (B/P) - Left click draws, Right click erases',
+              label: 'Round',
+            },
+            {
+              tool: 'pencil',
+              icon: <Pencil className="w-3.5 h-3.5" />,
+              title: 'Square Pencil (B/P) - Left click draws, Right click erases',
+              label: 'Square',
+            },
+          ]}
+          activeTool={activeTool}
+          setActiveTool={setActiveTool}
+          activeDrawColor={activeDrawColor}
+        />
 
         <button
           onClick={() => setActiveTool('eraser')}

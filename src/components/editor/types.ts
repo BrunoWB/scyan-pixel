@@ -2,6 +2,7 @@ import type { BwpxGrid } from '../../core/PixelGrid';
 
 export type ToolType =
   | 'pencil'
+  | 'round-pencil'
   | 'eraser'
   | 'bucket'
   | 'eyedropper'

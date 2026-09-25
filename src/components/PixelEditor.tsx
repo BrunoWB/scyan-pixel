@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { PixelGrid, PixelGrid as BwpxGrid, unpackCoord } from '../core/PixelGrid';
 import {
   drawLine,
@@ -277,12 +278,42 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
   }, [selectedSliceId, selectedSliceIds, pendingSelection, slices, isMovingSelection, setSelection]);
 
   // 5. Tool & Interaction State
-  const [activeTool, setActiveTool] = useState<ToolType>(externalTool || 'pencil');
+  const [activeTool, setActiveTool] = useState<ToolType>(externalTool || 'round-pencil');
+  const lastPencilVariantRef = useRef<ToolType>('round-pencil');
+
   useEffect(() => {
     if (externalTool) {
       setActiveTool(externalTool);
     }
   }, [externalTool]);
+
+  useEffect(() => {
+    if (activeTool === 'pencil' || activeTool === 'round-pencil') {
+      lastPencilVariantRef.current = activeTool;
+    }
+  }, [activeTool]);
+
+  const [fillFeedback, setFillFeedback] = useState<string | null>(null);
+  const fillFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showFillFeedback = useCallback((msg: string) => {
+    if (fillFeedbackTimerRef.current) {
+      clearTimeout(fillFeedbackTimerRef.current);
+    }
+    setFillFeedback(msg);
+    fillFeedbackTimerRef.current = setTimeout(() => {
+      setFillFeedback(null);
+      fillFeedbackTimerRef.current = null;
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (fillFeedbackTimerRef.current) {
+        clearTimeout(fillFeedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   const [brushSize, setBrushSize] = useState<number>(1);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
@@ -546,7 +577,8 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
         hoverPos,
         brushIndicatorColor: activeDrawColor,
         brushSize,
-        showBrushIndicator: (activeTool === 'pencil' || activeTool === 'eraser') && !ghostPlacement,
+        brushShape: activeTool === 'round-pencil' ? 'circle' : 'square',
+        showBrushIndicator: (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser') && !ghostPlacement,
         frameBounds: null,
         ghost: ghost || (ghostPlacement ? {
           pixels: ghostPlacement.pixels,
@@ -775,7 +807,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
 
       // Tool shortcuts
       const k = e.key.toLowerCase();
-      if (k === 'b' || k === 'p') setActiveTool('pencil');
+      if (k === 'b' || k === 'p') setActiveTool(lastPencilVariantRef.current);
       else if (k === 'e') setActiveTool('eraser');
       else if (k === 'g') setActiveTool('bucket');
       else if (k === 'i' && !isStrictMonochrome) setActiveTool('eyedropper');
@@ -927,12 +959,13 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     }
 
     if (e.button === 2) {
-      if (activeTool === 'pencil') {
+      if (activeTool === 'pencil' || activeTool === 'round-pencil') {
         collaboration?.ensureActiveRoom?.();
         const coords = getGridCoords(e.clientX, e.clientY);
         const { x, y } = coords;
         const next = grid.clone();
-        drawBrushDot(next, x, y, 0, brushSize);
+        const isRound = activeTool === 'round-pencil';
+        drawBrushDot(next, x, y, 0, brushSize, undefined, isRound);
         setIsDrawing(true);
         isDrawingRef.current = true;
         setDrawButton(2);
@@ -944,7 +977,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
         commitGrid(next);
         const now = Date.now();
         pixelTimestampsRef.current.set(x, y, now);
-        collaboration?.broadcastPixels?.(getBrushDotPixels(x, y, brushSize, null, now));
+        collaboration?.broadcastPixels?.(getBrushDotPixels(x, y, brushSize, null, now, isRound));
         collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
         return;
       }
@@ -1081,17 +1114,22 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     if (activeTool === 'bucket') {
       collaboration?.ensureActiveRoom?.();
       const next = grid.clone();
-      floodFill(next, x, y, 1, activeDrawColor);
-      commitAndBroadcast(next);
-      recentPaletteRef.current?.pushColor(activeDrawColor);
+      const fillRes = floodFill(next, x, y, 1, activeDrawColor, { selection });
+      if (fillRes.filled) {
+        commitAndBroadcast(next);
+        recentPaletteRef.current?.pushColor(activeDrawColor);
+      } else if (fillRes.reason === 'unbounded_void') {
+        showFillFeedback("Cannot fill open void — enclose the area or use a selection.");
+      }
       return;
     }
 
-    if (activeTool === 'pencil' || activeTool === 'eraser') {
+    if (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser') {
       collaboration?.ensureActiveRoom?.();
       const next = grid.clone();
       const val = activeTool === 'eraser' ? 0 : 1;
-      drawBrushDot(next, x, y, val, brushSize, activeDrawColor);
+      const isRound = activeTool === 'round-pencil';
+      drawBrushDot(next, x, y, val, brushSize, activeDrawColor, isRound);
       setIsDrawing(true);
       isDrawingRef.current = true;
       strokeGridRef.current = next;
@@ -1100,7 +1138,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
       const now = Date.now();
       pixelTimestampsRef.current.set(x, y, now);
       collaboration?.broadcastPixels?.(
-        getBrushDotPixels(x, y, brushSize, val === 0 ? null : activeDrawColor, now)
+        getBrushDotPixels(x, y, brushSize, val === 0 ? null : activeDrawColor, now, isRound)
       );
       collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
       if (val === 1) recentPaletteRef.current?.pushColor(activeDrawColor);
@@ -1149,10 +1187,11 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
 
     if (!isDrawing || !startPos) return;
 
-    if (activeTool === 'pencil' || activeTool === 'eraser') {
+    if (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser') {
       const prevCoords = startPosRef.current;
       if (strokeGridRef.current && prevCoords) {
         const val = drawButton === 2 || activeTool === 'eraser' ? 0 : 1;
+        const isRound = activeTool === 'round-pencil';
         if (prevCoords.x !== coords.x || prevCoords.y !== coords.y) {
           drawLine(
             strokeGridRef.current,
@@ -1162,7 +1201,8 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
             coords.y,
             val,
             brushSize,
-            activeDrawColor
+            val === 0 ? undefined : activeDrawColor,
+            isRound
           );
           const now = Date.now();
           const linePixels = getLinePixels(
@@ -1172,7 +1212,8 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
             coords.y,
             brushSize,
             val === 0 ? null : activeDrawColor,
-            now
+            now,
+            isRound
           );
           for (const lp of linePixels) {
             pixelTimestampsRef.current.set(lp[0], lp[1], now);
@@ -1386,7 +1427,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     strokeGridRef.current = null;
     setGhost(null);
 
-    if (activeTool === 'pencil' || activeTool === 'eraser') {
+    if (activeTool === 'pencil' || activeTool === 'round-pencil' || activeTool === 'eraser') {
       collaboration?.saveRoom?.(gridRef.current, pixelTimestampsRef.current);
       return;
     }
@@ -1909,6 +1950,16 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
 
         {/* Room Joining Gate Overlay (if provided by collaborative wrapper) */}
         {collaboration?.overlaySlot}
+
+        {/* Floating feedback message (e.g. bucket void warning) */}
+        {fillFeedback && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-300">
+            <div className="bg-[#181c24]/95 border border-amber-500/50 text-amber-200 text-xs px-3.5 py-2 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-2 font-mono">
+              <AlertCircle size={14} className="text-amber-400 shrink-0" />
+              <span>{fillFeedback}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 3. BOTTOM STATUS BAR */}
