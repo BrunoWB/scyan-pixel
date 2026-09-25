@@ -272,10 +272,6 @@ export interface PixelEditorProps {
   onGridChange?: (grid: BwpxGrid) => void;
   title?: string;
   badgeText?: string;
-  showLogo?: boolean;
-  showNewButton?: boolean;
-  loadButtonLabel?: string;
-  loadButtonIcon?: 'upload' | 'folder';
   showPresets?: boolean;
   colorMode?: 'palette' | 'monochrome';
   defaultPixelColor?: string;
@@ -303,6 +299,15 @@ export interface PixelEditorProps {
 
   // Optional collaboration adapter
   collaboration?: PixelEditorCollaborationProps;
+
+  // Header customization & Atlas Mode
+  isAtlas?: boolean;
+  showLogo?: boolean;
+  showTitle?: boolean;
+  showBrandHeader?: boolean;
+  showNewButton?: boolean;
+  loadButtonLabel?: string;
+  loadButtonIcon?: 'upload' | 'folder' | 'import';
 }
 
 export type BwpxEditorProps = PixelEditorProps;

@@ -149,4 +149,50 @@ describe('PixelEditor live stroke decoupling and history atomicity', () => {
     expect(history.current.get(5, 5)).toBe(1);
     expect(onGridChange).toHaveBeenCalledTimes(1);
   });
+
+  it('renders atlas mode without logo/title, without new button, and with Import button', () => {
+    const html = renderToString(
+      <PixelEditor
+        isAtlas={true}
+        initialWidth={32}
+        initialHeight={32}
+      />
+    );
+
+    // In atlas mode: logo and title are NOT rendered
+    expect(html).not.toContain('BrandIdentityLogo');
+    expect(html).not.toContain('SCYAN PIXEL EDITOR');
+    expect(html).not.toContain('SCYAN PIXEL');
+
+    // New button is NOT rendered
+    expect(html).not.toContain('New Canvas / New Room');
+    expect(html).not.toContain('>New<');
+
+    // Load button is renamed to Import and uses import title
+    expect(html).toContain('Import');
+    expect(html).toContain('title="Import image or sprite into atlas"');
+    expect(html).toContain('aria-label="Import"');
+  });
+
+  it('renders standard mode with logo/title, New button, and Load button', () => {
+    const html = renderToString(
+      <PixelEditor
+        isAtlas={false}
+        initialWidth={32}
+        initialHeight={32}
+      />
+    );
+
+    // In standard mode: logo/title is rendered
+    expect(html).toContain('SCYAN');
+    expect(html).toContain('PIXEL');
+
+    // New button is rendered
+    expect(html).toContain('New Canvas / New Room');
+    expect(html).toContain('>New<');
+
+    // Load button is rendered
+    expect(html).toContain('Load');
+    expect(html).toContain('title="Load Saved Room, Import and Export"');
+  });
 });

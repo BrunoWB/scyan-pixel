@@ -10,8 +10,8 @@ import {
   Plus,
   FilePlus,
   FolderOpen,
-  Upload,
   UserPlus,
+  Upload,
 } from 'lucide-react';
 import { BrandIdentityLogo, BrandWolfMascot } from '../../brand/BrandIdentityLogo';
 import { ColorPicker } from '../../ColorPicker';
@@ -25,10 +25,10 @@ export interface EditorHeaderProps {
   badgeText?: string;
   isHeaderHovered: boolean;
   setIsHeaderHovered: (hovered: boolean) => void;
+  // Brand Header & Logo visibility
+  showBrandHeader?: boolean;
   showLogo?: boolean;
-  showNewButton?: boolean;
-  loadButtonLabel?: string;
-  loadButtonIcon?: 'upload' | 'folder';
+  showTitle?: boolean;
   // History
   canUndo: boolean;
   canRedo: boolean;
@@ -67,7 +67,10 @@ export interface EditorHeaderProps {
   connectedPeers?: ConnectedPeer[];
   showCollaboration?: boolean;
   // Room Storage / Canvas Actions
+  showNewButton?: boolean;
   onNewCanvas?: () => void;
+  loadButtonLabel?: string;
+  loadButtonIcon?: 'upload' | 'folder' | 'import';
   onOpenLoadModal?: () => void;
 }
 
@@ -76,10 +79,9 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   badgeText,
   isHeaderHovered,
   setIsHeaderHovered,
-  showLogo = true,
-  showNewButton = true,
-  loadButtonLabel = 'Import',
-  loadButtonIcon,
+  showBrandHeader = true,
+  showLogo: propShowLogo,
+  showTitle: propShowTitle,
   canUndo,
   canRedo,
   historyIndex,
@@ -111,38 +113,47 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   onOpenShareModal,
   connectedPeers = [],
   showCollaboration = true,
+  showNewButton = true,
   onNewCanvas,
+  loadButtonLabel = 'Load',
+  loadButtonIcon,
   onOpenLoadModal,
 }) => {
+  const isLogoVisible = propShowLogo ?? showBrandHeader;
+  const isTitleVisible = propShowTitle ?? showBrandHeader;
+  const hasBrandSection = isLogoVisible || (isTitleVisible && Boolean(title));
 
   return (
     <header
       onMouseEnter={() => setIsHeaderHovered(true)}
       onMouseLeave={() => setIsHeaderHovered(false)}
-      className="relative flex items-center justify-between pl-6 sm:pl-8 pr-4 sm:pr-6 h-13 sm:h-12 bg-[#11141c]/95 backdrop-blur-xs border-b border-[#202534] z-20 gap-4 overflow-visible select-none shadow-[inset_0_-1px_0_rgba(255,255,255,0.02)]"
-      style={{ paddingLeft: '1.75rem' }}
+      className={`relative flex items-center justify-between ${
+        hasBrandSection ? 'pl-6 sm:pl-8' : 'pl-3 sm:pl-4'
+      } pr-4 sm:pr-6 h-13 sm:h-12 bg-[#11141c]/95 backdrop-blur-xs border-b border-[#202534] z-20 gap-4 overflow-visible select-none shadow-[inset_0_-1px_0_rgba(255,255,255,0.02)]`}
+      style={hasBrandSection ? { paddingLeft: '1.75rem' } : undefined}
     >
       {/* Ambient header glow backdrop on hover, softly radiating across the header from the logo */}
-      <div
-        className={`absolute inset-0 pointer-events-none transition-opacity duration-700 ease-out ${
-          isHeaderHovered ? 'opacity-100' : 'opacity-0'
-        }`}
-        aria-hidden="true"
-        style={{
-          background:
-            'radial-gradient(circle at 90px 50%, rgba(245, 148, 66, 0.09) 0%, rgba(169, 83, 246, 0.03) 45%, transparent 75%)',
-        }}
-      />
+      {isLogoVisible && (
+        <div
+          className={`absolute inset-0 pointer-events-none transition-opacity duration-700 ease-out ${
+            isHeaderHovered ? 'opacity-100' : 'opacity-0'
+          }`}
+          aria-hidden="true"
+          style={{
+            background:
+              'radial-gradient(circle at 90px 50%, rgba(245, 148, 66, 0.09) 0%, rgba(169, 83, 246, 0.03) 45%, transparent 75%)',
+          }}
+        />
+      )}
 
-      {/* Left: Brand Mascot & Identity Logo (unclipped, breakout) + Tool Actions */}
+      {/* Left: Brand Mascot & Identity Logo (if visible) + Tool Actions */}
       <div className="flex items-center min-w-0 h-full overflow-visible z-10">
-        {/* Brand Mascot & Logo: generous spacing, unconstrained glow */}
-        {showLogo ? (
+        {isLogoVisible ? (
           <div
             className="flex items-center shrink-0 relative overflow-visible py-0.5"
             style={{ marginRight: '1.75rem' }}
           >
-            {!title || title === 'SCYAN PIXEL EDITOR' || title === 'BWPX PIXEL EDITOR' ? (
+            {!isTitleVisible || !title || title === 'SCYAN PIXEL EDITOR' || title === 'BWPX PIXEL EDITOR' ? (
               <BrandIdentityLogo size={42} badgeText={badgeText} isHovered={isHeaderHovered} />
             ) : (
               <div className="flex items-center gap-3">
@@ -156,7 +167,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
               </div>
             )}
           </div>
-        ) : title ? (
+        ) : isTitleVisible && title ? (
           <div
             className="flex items-center shrink-0 relative overflow-visible py-0.5"
             style={{ marginRight: '1.75rem' }}
@@ -170,7 +181,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           </div>
         ) : null}
 
-        {(showLogo || Boolean(title)) && (
+        {hasBrandSection && (
           <div
             className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0"
             style={{ marginRight: '1.5rem' }}
@@ -199,13 +210,13 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
               onClick={onOpenLoadModal}
               disabled={!onOpenLoadModal}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 hover:text-white bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] transition shadow-xs cursor-pointer active:scale-98 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-              title={loadButtonLabel === 'Import' ? 'Import Image or Project File' : 'Load Saved Room, Import and Export'}
-              aria-label={loadButtonLabel === 'Import' ? 'Import Image or Project File' : 'Load Saved Room, Import and Export'}
+              title={loadButtonLabel === 'Import' ? 'Import image or sprite into atlas' : 'Load Saved Room, Import and Export'}
+              aria-label={loadButtonLabel === 'Import' ? 'Import' : 'Load Saved Room, Import and Export'}
             >
-              {(loadButtonIcon === 'folder' || (loadButtonIcon === undefined && loadButtonLabel === 'Load')) ? (
-                <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
+              {(loadButtonIcon === 'upload' || loadButtonIcon === 'import' || (loadButtonIcon === undefined && loadButtonLabel === 'Import')) ? (
                 <Upload className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
               )}
               <span>{loadButtonLabel}</span>
             </button>

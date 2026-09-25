@@ -73,10 +73,6 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     onGridChange,
     title = 'SCYAN PIXEL EDITOR',
     badgeText = 'PIXEL',
-    showLogo = true,
-    showNewButton = true,
-    loadButtonLabel = 'Import',
-    loadButtonIcon,
     showPresets: _showPresets = true,
     colorMode = 'monochrome',
     defaultPixelColor = '#ffffff',
@@ -104,9 +100,24 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
 
     // Optional collaboration adapter
     collaboration,
+
+    // Header customization & Atlas Mode
+    isAtlas = false,
+    showLogo,
+    showTitle,
+    showBrandHeader,
+    showNewButton,
+    loadButtonLabel,
+    loadButtonIcon,
   },
   forwardedRef
 ) {
+  const isAtlasMode = Boolean(isAtlas);
+  const effectiveShowLogo = showLogo ?? (showBrandHeader ?? !isAtlasMode);
+  const effectiveShowTitle = showTitle ?? (showBrandHeader ?? !isAtlasMode);
+  const effectiveShowNewButton = showNewButton ?? !isAtlasMode;
+  const effectiveLoadButtonLabel = loadButtonLabel ?? (isAtlasMode ? 'Import' : 'Load');
+  const effectiveLoadButtonIcon = loadButtonIcon ?? (isAtlasMode ? 'upload' : 'folder');
   // 1. Color & Theme State
   const isStrictMonochrome = Boolean(colorMode === 'monochrome' || (propPixelColor && !allowColorThemes));
   const customPixelColor = propPixelColor || (isStrictMonochrome ? '#ffffff' : defaultPixelColor);
@@ -1962,17 +1973,19 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
         badgeText={badgeText}
         isHeaderHovered={isHeaderHovered}
         setIsHeaderHovered={setIsHeaderHovered}
-        showLogo={showLogo}
-        showNewButton={showNewButton}
-        loadButtonLabel={loadButtonLabel}
-        loadButtonIcon={loadButtonIcon}
+        showBrandHeader={effectiveShowLogo || effectiveShowTitle}
+        showLogo={effectiveShowLogo}
+        showTitle={effectiveShowTitle}
+        showNewButton={effectiveShowNewButton}
+        loadButtonLabel={effectiveLoadButtonLabel}
+        loadButtonIcon={effectiveLoadButtonIcon}
         canUndo={canUndo}
         canRedo={canRedo}
         historyIndex={historyIndex}
         historyLength={historyLength}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        onNewCanvas={collaboration?.onNewCanvas ?? (showNewButton ? handleNewCanvas : undefined)}
+        onNewCanvas={collaboration?.onNewCanvas ?? (effectiveShowNewButton ? handleNewCanvas : undefined)}
         onOpenLoadModal={collaboration?.onOpenLoadModal ?? handleOpenImportDialog}
         brushSize={brushSize}
         setBrushSize={setBrushSize}
