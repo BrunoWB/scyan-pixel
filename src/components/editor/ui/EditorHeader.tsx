@@ -10,6 +10,7 @@ import {
   Plus,
   FilePlus,
   FolderOpen,
+  Upload,
   UserPlus,
 } from 'lucide-react';
 import { BrandIdentityLogo, BrandWolfMascot } from '../../brand/BrandIdentityLogo';
@@ -24,6 +25,10 @@ export interface EditorHeaderProps {
   badgeText?: string;
   isHeaderHovered: boolean;
   setIsHeaderHovered: (hovered: boolean) => void;
+  showLogo?: boolean;
+  showNewButton?: boolean;
+  loadButtonLabel?: string;
+  loadButtonIcon?: 'upload' | 'folder';
   // History
   canUndo: boolean;
   canRedo: boolean;
@@ -71,6 +76,10 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   badgeText,
   isHeaderHovered,
   setIsHeaderHovered,
+  showLogo = true,
+  showNewButton = true,
+  loadButtonLabel = 'Import',
+  loadButtonIcon,
   canUndo,
   canRedo,
   historyIndex,
@@ -128,55 +137,77 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
       {/* Left: Brand Mascot & Identity Logo (unclipped, breakout) + Tool Actions */}
       <div className="flex items-center min-w-0 h-full overflow-visible z-10">
         {/* Brand Mascot & Logo: generous spacing, unconstrained glow */}
-        <div
-          className="flex items-center shrink-0 relative overflow-visible py-0.5"
-          style={{ marginRight: '1.75rem' }}
-        >
-          {!title || title === 'SCYAN PIXEL EDITOR' || title === 'BWPX PIXEL EDITOR' ? (
-            <BrandIdentityLogo size={42} badgeText={badgeText} isHovered={isHeaderHovered} />
-          ) : (
-            <div className="flex items-center gap-3">
-              <BrandWolfMascot size={42} isHovered={isHeaderHovered} />
-              <span
-                className="font-bold text-sm tracking-wider"
-                style={{ color: activePixelColor }}
-              >
-                {title}
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div
-          className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0"
-          style={{ marginRight: '1.5rem' }}
-        />
-
-        {/* Action Controls: New/Load, Undo/Redo, Brush Size, Transforms (scrollable on narrow screens) */}
-        <div className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto py-1">
-          {/* New Canvas & Load Modal Button */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={onNewCanvas}
-              disabled={!onNewCanvas}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 hover:text-white bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] transition shadow-xs cursor-pointer active:scale-98 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-              title="New Canvas / New Room"
-              aria-label="New Canvas / New Room"
+        {showLogo ? (
+          <div
+            className="flex items-center shrink-0 relative overflow-visible py-0.5"
+            style={{ marginRight: '1.75rem' }}
+          >
+            {!title || title === 'SCYAN PIXEL EDITOR' || title === 'BWPX PIXEL EDITOR' ? (
+              <BrandIdentityLogo size={42} badgeText={badgeText} isHovered={isHeaderHovered} />
+            ) : (
+              <div className="flex items-center gap-3">
+                <BrandWolfMascot size={42} isHovered={isHeaderHovered} />
+                <span
+                  className="font-bold text-sm tracking-wider"
+                  style={{ color: activePixelColor }}
+                >
+                  {title}
+                </span>
+              </div>
+            )}
+          </div>
+        ) : title ? (
+          <div
+            className="flex items-center shrink-0 relative overflow-visible py-0.5"
+            style={{ marginRight: '1.75rem' }}
+          >
+            <span
+              className="font-bold text-sm tracking-wider"
+              style={{ color: activePixelColor }}
             >
-              <FilePlus className="w-3.5 h-3.5 text-cyan-400" />
-              <span>New</span>
-            </button>
+              {title}
+            </span>
+          </div>
+        ) : null}
+
+        {(showLogo || Boolean(title)) && (
+          <div
+            className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0"
+            style={{ marginRight: '1.5rem' }}
+          />
+        )}
+
+        {/* Action Controls: New/Load/Import, Undo/Redo, Brush Size, Transforms (scrollable on narrow screens) */}
+        <div className="flex items-center gap-2.5 sm:gap-3 overflow-x-auto py-1">
+          {/* New Canvas & Load/Import Modal Button */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {showNewButton && (
+              <button
+                type="button"
+                onClick={onNewCanvas}
+                disabled={!onNewCanvas}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 hover:text-white bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] transition shadow-xs cursor-pointer active:scale-98 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                title="New Canvas / New Room"
+                aria-label="New Canvas / New Room"
+              >
+                <FilePlus className="w-3.5 h-3.5 text-cyan-400" />
+                <span>New</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onOpenLoadModal}
               disabled={!onOpenLoadModal}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-200 hover:text-white bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] transition shadow-xs cursor-pointer active:scale-98 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-              title="Load Saved Room, Import and Export"
-              aria-label="Load Saved Room, Import and Export"
+              title={loadButtonLabel === 'Import' ? 'Import Image or Project File' : 'Load Saved Room, Import and Export'}
+              aria-label={loadButtonLabel === 'Import' ? 'Import Image or Project File' : 'Load Saved Room, Import and Export'}
             >
-              <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
-              <span>Load</span>
+              {(loadButtonIcon === 'folder' || (loadButtonIcon === undefined && loadButtonLabel === 'Load')) ? (
+                <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <Upload className="w-3.5 h-3.5 text-amber-400" />
+              )}
+              <span>{loadButtonLabel}</span>
             </button>
           </div>
 

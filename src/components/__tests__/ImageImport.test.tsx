@@ -101,7 +101,7 @@ describe('EditorHeader & RoomStorageModal import integration', () => {
     expect(html).toContain('Choose Image or GIF...');
   });
 
-  it('renders Load button in EditorHeader that opens room storage modal', () => {
+  it('renders Import button in EditorHeader that opens room storage / import modal', () => {
     const onOpenLoadModal = vi.fn();
     const html = renderToString(
       <EditorHeader
@@ -135,8 +135,8 @@ describe('EditorHeader & RoomStorageModal import integration', () => {
       />
     );
 
-    expect(html).toContain('Load');
-    expect(html).toContain('aria-label="Load Saved Room, Import and Export"');
+    expect(html).toContain('Import');
+    expect(html).toContain('aria-label="Import Image or Project File"');
   });
 });
 

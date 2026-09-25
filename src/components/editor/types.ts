@@ -272,6 +272,10 @@ export interface PixelEditorProps {
   onGridChange?: (grid: BwpxGrid) => void;
   title?: string;
   badgeText?: string;
+  showLogo?: boolean;
+  showNewButton?: boolean;
+  loadButtonLabel?: string;
+  loadButtonIcon?: 'upload' | 'folder';
   showPresets?: boolean;
   colorMode?: 'palette' | 'monochrome';
   defaultPixelColor?: string;

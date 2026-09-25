@@ -74,18 +74,38 @@ describe('EditorHeader Brush Size Numerical Picker', () => {
     expect(html).not.toContain('<button>4</button>');
   });
 
-  it('renders increased New and Load buttons between logo and undo/redo', () => {
+  it('renders New and Import buttons between logo and undo/redo by default', () => {
     const html = renderToString(<EditorHeader {...defaultProps} />);
 
-    // Renders "New" and "Load" prominent action buttons with text labels and icons
+    // Renders "New" and "Import" prominent action buttons with text labels and icons
     expect(html).toContain('New');
-    expect(html).toContain('Load');
+    expect(html).toContain('Import');
     expect(html).toContain('title="New Canvas / New Room"');
-    expect(html).toContain('title="Load Saved Room, Import and Export"');
-    expect(html).toContain('aria-label="Load Saved Room, Import and Export"');
+    expect(html).toContain('title="Import Image or Project File"');
+    expect(html).toContain('aria-label="Import Image or Project File"');
 
-    // Includes FilePlus and FolderOpen icons
+    // Includes FilePlus and Upload icons
     expect(html).toContain('lucide-file-plus');
+    expect(html).toContain('lucide-upload');
+  });
+
+  it('supports hiding New button when showNewButton is false', () => {
+    const html = renderToString(<EditorHeader {...defaultProps} showNewButton={false} />);
+    expect(html).not.toContain('title="New Canvas / New Room"');
+    expect(html).toContain('Import');
+  });
+
+  it('supports hiding logo when showLogo is false', () => {
+    const htmlWithLogo = renderToString(<EditorHeader {...defaultProps} showLogo={true} />);
+    const htmlWithoutLogo = renderToString(<EditorHeader {...defaultProps} title="" showLogo={false} />);
+
+    expect(htmlWithLogo).toContain('SCYAN');
+    expect(htmlWithoutLogo).not.toContain('SCYAN');
+  });
+
+  it('supports custom loadButtonLabel and folder icon fallback', () => {
+    const html = renderToString(<EditorHeader {...defaultProps} loadButtonLabel="Load" />);
+    expect(html).toContain('Load');
     expect(html).toContain('lucide-folder-open');
   });
 
