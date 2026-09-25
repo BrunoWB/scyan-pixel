@@ -265,16 +265,14 @@ export class PeerSessionManager {
 
         // Broadcast profile and room info to the newly joined peer
         this.profileAction?.send(this.profile, peerId);
-        if (this.currentRoomUuid) {
-          this.roomInfoAction?.send(
-            {
-              roomName: this.currentRoomId,
-              roomUuid: this.currentRoomUuid,
-              peerId: this.profile.id,
-            },
-            peerId
-          );
-        }
+        this.roomInfoAction?.send(
+          {
+            roomName: this.currentRoomId,
+            roomUuid: this.currentRoomUuid || '',
+            peerId: this.profile.id,
+          },
+          peerId
+        );
 
         // Canvas State Synchronization
         const snapshot = this.callbacks.onGetSnapshot?.();
@@ -327,22 +325,31 @@ export class PeerSessionManager {
               },
               peerId
             );
-            // Request snapshot from peer since we just adopted their room
-            this.snapshotRequestAction?.send({ fromPeer: this.profile.id }, peerId);
+            // Flush any snapshot that arrived while waiting for handshake
+            const pending = this.pendingSnapshots.get(peerId);
+            if (pending) {
+              this.pendingSnapshots.delete(peerId);
+              this.callbacks.onRemoteSnapshot?.(pending);
+            } else {
+              // Request snapshot from peer since we just adopted their room
+              this.snapshotRequestAction?.send({ fromPeer: this.profile.id }, peerId);
+            }
           }
           return;
         }
 
         // Local peer has UUID, but remote peer has empty UUID (they just joined and are waiting to adopt)
         if (!info.roomUuid) {
-          this.roomInfoAction?.send(
-            {
-              roomName: this.currentRoomId,
-              roomUuid: this.currentRoomUuid,
-              peerId: this.profile.id,
-            },
-            peerId
-          );
+          if (this.currentRoomUuid) {
+            this.roomInfoAction?.send(
+              {
+                roomName: this.currentRoomId,
+                roomUuid: this.currentRoomUuid,
+                peerId: this.profile.id,
+              },
+              peerId
+            );
+          }
           return;
         }
 

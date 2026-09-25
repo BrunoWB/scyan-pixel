@@ -141,6 +141,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
   onSlicesChangeRef.current = onSlicesChange;
 
   const selectionRef = useRef<SelectionOverlay | null>(null);
+  const setSelectionRef = useRef<((sel: SelectionOverlay | null) => void) | undefined>(undefined);
 
   // 2. Editor History Hook (Undo/Redo with slice updates)
   const {
@@ -162,6 +163,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     onSliceMoveRef,
     onSlicesMoveRef,
     selectionRef,
+    setSelectionRef,
   });
 
   const gridRef = useRef<BwpxGrid>(grid);
@@ -217,7 +219,8 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
 
   useEffect(() => {
     selectionRef.current = selection;
-  }, [selection]);
+    setSelectionRef.current = setSelection;
+  }, [selection, setSelection]);
 
   // Synchronize selection with slices from inspector or external props
   useEffect(() => {

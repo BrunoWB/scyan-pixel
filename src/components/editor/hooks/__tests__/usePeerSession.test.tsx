@@ -411,6 +411,64 @@ describe('usePeerSession hook', () => {
     expect(newRoom).toBeTruthy();
     expect(window.location.hash).toContain(newRoom);
   });
+
+  it('does not generate a rogue random UUID or auto-save when joining a room from URL before UUID adoption', async () => {
+    (window.location as unknown as { hash: string }).hash = '#room=brand-new-external-room';
+
+    const holder: { session?: ReturnType<typeof usePeerSession> } = {};
+    // oxlint-disable-next-line react/immutability, react/globals
+    function TestComponent() {
+      // oxlint-disable-next-line react/immutability, react/globals
+      holder.session = usePeerSession();
+      return <div>url-join-safety-test</div>;
+    }
+
+    renderToString(<TestComponent />);
+    const session = holder.session!;
+
+    expect(session.roomId).toBe('brand-new-external-room');
+    expect(session.roomUuid).toBe('');
+
+    // Attempting to call saveRoom on an empty or modified grid while UUID is not yet adopted must not invent a UUID
+    const grid = new PixelGrid(16, 16);
+    grid.set(1, 1, 1, '#10b981');
+    await session.saveRoom(grid);
+
+    // Must not have generated a UUID
+    expect(session.roomUuid).toBe('');
+    expect(await loadRoomSnapshot('brand-new-external-room')).toBeNull();
+  });
+
+  it('persists canvas to IndexedDB once remote UUID is adopted and connects properly', async () => {
+    (window.location as unknown as { hash: string }).hash = '#room=remote-shared-canvas-room';
+
+    const testGrid = new PixelGrid(16, 16);
+    testGrid.set(2, 3, 1, '#3b82f6');
+
+    const holder: { session?: ReturnType<typeof usePeerSession> } = {};
+    // oxlint-disable-next-line react/immutability, react/globals
+    function TestComponent() {
+      // oxlint-disable-next-line react/immutability, react/globals
+      holder.session = usePeerSession({
+        getCurrentGrid: () => testGrid,
+      });
+      return <div>remote-adopt-save-test</div>;
+    }
+
+    renderToString(<TestComponent />);
+    const session = holder.session!;
+
+    expect(session.roomId).toBe('remote-shared-canvas-room');
+
+    // Simulate adopting remote UUID from host peer
+    await session.saveRoom(testGrid, undefined, 'remote-shared-canvas-room', 'uuid-host-adopt-999');
+
+    // Now verified: room was persisted with the host UUID
+    const saved = await loadRoomSnapshot('remote-shared-canvas-room');
+    expect(saved).not.toBeNull();
+    expect(saved?.roomUuid).toBe('uuid-host-adopt-999');
+    expect(saved?.pixels.length).toBeGreaterThan(0);
+  });
 });
 
 

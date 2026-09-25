@@ -155,4 +155,89 @@ describe('EditorHistory engine', () => {
     const html = renderToString(React.createElement(TestComponent));
     expect(html).toContain('data-has-reset="true"');
   });
+
+  it('preserves history and allows undo when parent state syncs committed grid back via initialGrid', () => {
+    // Simulate React component lifecycle: parent holds externalGrid and passes to useEditorHistory
+    let currentGrid = new BwpxGrid(16, 16);
+    let capturedGridChange: BwpxGrid | null = null;
+
+    // Component state simulation
+    let state: any = null;
+    const stateRef: { current: any } = { current: null };
+    const lastCommittedRef: { current: BwpxGrid | null } = { current: null };
+
+    // Initialize (first render)
+    lastCommittedRef.current = currentGrid;
+    state = {
+      history: [{ grid: currentGrid.clone(), selection: null }],
+      index: 0,
+    };
+    stateRef.current = state;
+
+    const onGridChange = (g: BwpxGrid) => {
+      capturedGridChange = g;
+      currentGrid = g; // Parent Zustand store updates: symbolsGrid = g
+    };
+
+    // Helper simulating commitGrid
+    const commitGrid = (nextGrid: BwpxGrid) => {
+      const nextCloned = nextGrid.clone();
+      lastCommittedRef.current = nextCloned;
+      const cur = stateRef.current;
+      const trimmed = cur.history.slice(0, cur.index + 1);
+      const nextHistory = [...trimmed, { grid: nextCloned, selection: null }];
+      const nextState = {
+        history: nextHistory,
+        index: nextHistory.length - 1,
+      };
+      stateRef.current = nextState;
+      state = nextState;
+      onGridChange(nextCloned);
+    };
+
+    // Helper simulating the initialGrid effect
+    const runInitialGridEffect = (gridProp: BwpxGrid) => {
+      if (gridProp && gridProp !== lastCommittedRef.current) {
+        lastCommittedRef.current = gridProp;
+        const nextState = {
+          history: [{ grid: gridProp.clone(), selection: null }],
+          index: 0,
+        };
+        stateRef.current = nextState;
+        state = nextState;
+      }
+    };
+
+    // 1. Initial state
+    expect(state.index).toBe(0);
+    expect(state.history.length).toBe(1);
+
+    // 2. Commit a stroke
+    const mutated = currentGrid.clone();
+    mutated.set(3, 3, 1);
+    commitGrid(mutated);
+
+    expect(capturedGridChange).not.toBeNull();
+    expect(state.index).toBe(1);
+    expect(state.history.length).toBe(2);
+
+    // 3. Parent re-renders and passes currentGrid back as initialGrid
+    runInitialGridEffect(currentGrid);
+
+    // CRITICAL: History MUST NOT be wiped back to 0/0!
+    expect(state.index).toBe(1);
+    expect(state.history.length).toBe(2);
+    expect(state.history[1].grid.get(3, 3)).toBe(1);
+
+    // 4. External swap (e.g. user opens a new file or resets defaults)
+    const externalGrid = new BwpxGrid(16, 16);
+    externalGrid.set(7, 7, 1);
+    runInitialGridEffect(externalGrid);
+
+    // When a truly new external grid arrives, history resets cleanly
+    expect(state.index).toBe(0);
+    expect(state.history.length).toBe(1);
+    expect(state.history[0].grid.get(7, 7)).toBe(1);
+  });
 });
+

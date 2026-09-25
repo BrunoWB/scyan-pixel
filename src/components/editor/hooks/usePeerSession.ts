@@ -144,8 +144,19 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     }
   }, [roomUuid]);
 
-  const [roomJoinStatus, setRoomJoinStatus] = useState<RoomJoinStatus>(() =>
+  const [roomJoinStatus, setRoomJoinStatusState] = useState<RoomJoinStatus>(() =>
     initialRoomId ? 'checking_local' : 'idle'
+  );
+  const roomJoinStatusRef = useRef<RoomJoinStatus>(initialRoomId ? 'checking_local' : 'idle');
+
+  const setRoomJoinStatus = useCallback(
+    (statusOrFn: RoomJoinStatus | ((current: RoomJoinStatus) => RoomJoinStatus)) => {
+      const nextStatus =
+        typeof statusOrFn === 'function' ? statusOrFn(roomJoinStatusRef.current) : statusOrFn;
+      roomJoinStatusRef.current = nextStatus;
+      setRoomJoinStatusState(nextStatus);
+    },
+    []
   );
 
   const joinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -170,7 +181,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
         return current;
       });
     }, optJoinTimeoutMs ?? 15000);
-  }, [clearJoinTimeout, optJoinTimeoutMs]);
+  }, [clearJoinTimeout, optJoinTimeoutMs, setRoomJoinStatus]);
 
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isLoadModalOpen, setIsLoadModalOpen] = useState<boolean>(false);
@@ -258,9 +269,11 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
       if (peers.length > 0) {
         clearJoinTimeout();
-        setRoomJoinStatus((current) =>
-          current === 'connecting' || current === 'timed_out' ? 'connected' : current
-        );
+        if (roomUuidRef.current) {
+          setRoomJoinStatus((current) =>
+            current === 'connecting' || current === 'timed_out' ? 'connected' : current
+          );
+        }
       }
 
       prevPeersRef.current = peers;
@@ -282,9 +295,11 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     },
     onRemoteSnapshot: (snapshot) => {
       clearJoinTimeout();
-      setRoomJoinStatus((current) =>
-        current === 'connecting' || current === 'timed_out' ? 'connected' : current
-      );
+      if (roomUuidRef.current) {
+        setRoomJoinStatus((current) =>
+          current === 'connecting' || current === 'timed_out' ? 'connected' : current
+        );
+      }
       addStatusEvent('sync', `Synchronized canvas snapshot with ${snapshot.pixels?.length || 0} pixels`);
       options?.onRemoteSnapshot?.(snapshot);
     },
@@ -296,14 +311,16 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     },
     onAdoptRoomUuid: (newUuid) => {
       clearJoinTimeout();
-      setRoomJoinStatus((current) =>
-        current === 'connecting' || current === 'timed_out' ? 'connected' : current
-      );
-      addStatusEvent('conflict', `Adopted remote room UUID (${newUuid.slice(0, 8)})`);
       roomUuidRef.current = newUuid;
       setRoomUuidState(newUuid);
+      setRoomJoinStatus('connected');
+      addStatusEvent('conflict', `Adopted remote room UUID (${newUuid.slice(0, 8)})`);
       if (roomIdRef.current) {
         updateStoredRoomUuid(roomIdRef.current, newUuid);
+        const currentGrid = options?.getCurrentGrid?.();
+        if (currentGrid && currentGrid.countOn() > 0) {
+          void saveRoom(currentGrid, options?.getCurrentTimestamps?.(), roomIdRef.current, newUuid);
+        }
       }
     },
   });
@@ -326,9 +343,11 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       },
       onRemoteSnapshot: (snapshot) => {
         clearJoinTimeout();
-        setRoomJoinStatus((current) =>
-          current === 'connecting' || current === 'timed_out' ? 'connected' : current
-        );
+        if (roomUuidRef.current) {
+          setRoomJoinStatus((current) =>
+            current === 'connecting' || current === 'timed_out' ? 'connected' : current
+          );
+        }
         addStatusEvent('sync', `Synchronized canvas snapshot with ${snapshot.pixels?.length || 0} pixels`);
         optOnRemoteSnapshot?.(snapshot);
       },
@@ -340,19 +359,21 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       },
       onAdoptRoomUuid: (newUuid) => {
         clearJoinTimeout();
-        setRoomJoinStatus((current) =>
-          current === 'connecting' || current === 'timed_out' ? 'connected' : current
-        );
-        addStatusEvent('conflict', `Adopted remote room UUID (${newUuid.slice(0, 8)})`);
         roomUuidRef.current = newUuid;
         setRoomUuidState(newUuid);
+        setRoomJoinStatus('connected');
+        addStatusEvent('conflict', `Adopted remote room UUID (${newUuid.slice(0, 8)})`);
         if (roomIdRef.current) {
           updateStoredRoomUuid(roomIdRef.current, newUuid);
+          const currentGrid = options?.getCurrentGrid?.();
+          if (currentGrid && currentGrid.countOn() > 0) {
+            void saveRoom(currentGrid, options?.getCurrentTimestamps?.(), roomIdRef.current, newUuid);
+          }
         }
       },
     };
     sessionManagerRef.current?.setCallbacks(callbacksRef.current);
-  }, [optOnRemoteMutation, optOnRemoteSnapshot, optOnGetSnapshot, handlePeersChange, addStatusEvent, clearJoinTimeout]);
+  }, [optOnRemoteMutation, optOnRemoteSnapshot, optOnGetSnapshot, handlePeersChange, addStatusEvent, clearJoinTimeout, setRoomJoinStatus]);
 
   // Handle external hash changes (e.g. user back/forward in browser history)
   useEffect(() => {
@@ -459,7 +480,11 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
   const ensureActiveRoom = useCallback(
     (_grid?: PixelGrid): string => {
-      if (roomJoinStatus === 'connecting' || roomJoinStatus === 'timed_out') {
+      if (
+        roomJoinStatusRef.current === 'connecting' ||
+        roomJoinStatusRef.current === 'timed_out' ||
+        roomJoinStatusRef.current === 'checking_local'
+      ) {
         return roomIdRef.current || roomId;
       }
       const activeName = roomIdRef.current || roomId || generateRoomName(profile.name);
@@ -482,7 +507,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
 
       return activeName;
     },
-    [roomJoinStatus, isRoomActiveInUrl, roomId, roomUuid, profile.name]
+    [isRoomActiveInUrl, roomId, roomUuid, profile.name]
   );
 
   const updateProfile = useCallback(
@@ -588,12 +613,27 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       targetRoomUuid?: string
     ): Promise<void> => {
       // Do not auto-save unconfirmed remote room before connecting!
-      if (roomJoinStatus === 'connecting' || roomJoinStatus === 'timed_out') {
+      if (
+        !targetRoomUuid &&
+        (roomJoinStatusRef.current === 'connecting' ||
+          roomJoinStatusRef.current === 'timed_out' ||
+          roomJoinStatusRef.current === 'checking_local')
+      ) {
         return;
       }
 
       const activeRoomId = targetRoomName || roomIdRef.current || ensureActiveRoom(grid);
       const isTargetingCurrent = !targetRoomName || targetRoomName === roomIdRef.current;
+
+      // If we are in a shared room from URL but haven't adopted/loaded its UUID yet,
+      // never generate a rogue random UUID that will cause room mismatch.
+      if (isTargetingCurrent && isRoomActiveInUrl && !roomUuidRef.current && !targetRoomUuid) {
+        const stored = await getStoredRoomUuid(activeRoomId);
+        if (!stored) {
+          return;
+        }
+      }
+
       const storedUuid = await getStoredRoomUuid(activeRoomId);
       const activeRoomUuid =
         targetRoomUuid ||
@@ -650,7 +690,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
       const updatedList = await listRoomSnapshots();
       setSavedRooms(updatedList);
     },
-    [roomJoinStatus, roomUuid, isRoomActiveInUrl, ensureActiveRoom, addStatusEvent]
+    [roomUuid, isRoomActiveInUrl, ensureActiveRoom, addStatusEvent]
   );
 
   const restoreRoom = useCallback(
@@ -732,7 +772,9 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     if (!conflictInfo) return;
     const { roomName, remoteUuid, remotePeerId } = conflictInfo;
     await updateStoredRoomUuid(roomName, remoteUuid);
+    roomUuidRef.current = remoteUuid;
     setRoomUuidState(remoteUuid);
+    setRoomJoinStatus('connected');
     options?.onDiscardLocalConflict?.();
     const manager = getManager();
     manager.resolveConflictAdopt(remoteUuid, remotePeerId);
@@ -740,7 +782,7 @@ export function usePeerSession(options?: UsePeerSessionOptions): UsePeerSessionR
     setConflictInfo(null);
     const updatedList = await listRoomSnapshots();
     setSavedRooms(updatedList);
-  }, [conflictInfo, getManager, options]);
+  }, [conflictInfo, getManager, options, setRoomJoinStatus]);
 
   const resolveConflictKeepLocal = useCallback(() => {
     if (!conflictInfo) return;

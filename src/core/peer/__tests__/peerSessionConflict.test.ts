@@ -298,4 +298,82 @@ describe('PeerSessionManager UUID handshake and conflict detection', () => {
     expect(snapshotReq).toBeDefined();
     expect(snapshotReq?.target).toBe('peer-bob');
   });
+
+  it('sends roomInfo with empty roomUuid on peer join when local peer has no UUID yet', () => {
+    const { factory, roomMock, sentActions } = createMockRoomFactory();
+    const profile = createDefaultPeerProfile();
+
+    new PeerSessionManager({
+      roomId: 'shared-url-room',
+      roomUuid: '',
+      profile,
+      roomFactory: factory,
+    });
+
+    roomMock.onPeerJoin?.('peer-host');
+
+    const roomInfoSent = sentActions.find((a) => a.type === 'roomInfo');
+    expect(roomInfoSent).toBeDefined();
+    expect(roomInfoSent?.data).toEqual({
+      roomName: 'shared-url-room',
+      roomUuid: '',
+      peerId: profile.id,
+    });
+    expect(roomInfoSent?.target).toBe('peer-host');
+  });
+
+  it('adopts remote UUID without declaring conflict when local peer joins with empty UUID', () => {
+    const { factory, actionHandlers } = createMockRoomFactory();
+    const profile = createDefaultPeerProfile();
+    let adoptedUuid: string | null = null;
+    let receivedSnapshot: any = null;
+    let conflictDetected = false;
+
+    new PeerSessionManager({
+      roomId: 'new-url-room',
+      roomUuid: '',
+      profile,
+      roomFactory: factory,
+      callbacks: {
+        onAdoptRoomUuid: (uuid) => {
+          adoptedUuid = uuid;
+        },
+        onRemoteSnapshot: (snapshot) => {
+          receivedSnapshot = snapshot;
+        },
+        onRoomConflict: () => {
+          conflictDetected = true;
+        },
+      },
+    });
+
+    const roomInfoHandler = actionHandlers.get('roomInfo');
+    const snapshotHandler = actionHandlers.get('snapshot');
+
+    // Host sends snapshot response
+    snapshotHandler?.(
+      {
+        type: 'snapshot',
+        width: 16,
+        height: 16,
+        pixels: [[1, 2, '#00e5a3']],
+      },
+      'peer-host'
+    );
+
+    // Host sends roomInfo with its UUID
+    roomInfoHandler?.(
+      {
+        roomName: 'new-url-room',
+        roomUuid: 'uuid-host-1234',
+        peerId: 'peer-host',
+      },
+      'peer-host'
+    );
+
+    expect(conflictDetected).toBe(false);
+    expect(adoptedUuid).toBe('uuid-host-1234');
+    expect(receivedSnapshot).not.toBeNull();
+    expect(receivedSnapshot.pixels).toEqual([[1, 2, '#00e5a3']]);
+  });
 });

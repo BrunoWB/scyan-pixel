@@ -84,6 +84,7 @@ export interface UseEditorHistoryOptions {
   onSliceMoveRef?: React.MutableRefObject<((sliceId: string, newX: number, newY: number) => void) | undefined>;
   onSlicesMoveRef?: React.MutableRefObject<((updates: { id: string; dx: number; dy: number }[]) => void) | undefined>;
   selectionRef?: React.MutableRefObject<{ x: number; y: number; w: number; h: number; active: boolean } | null>;
+  setSelectionRef?: React.MutableRefObject<((sel: { x: number; y: number; w: number; h: number; active: boolean } | null) => void) | undefined>;
   setSelection?: (sel: { x: number; y: number; w: number; h: number; active: boolean } | null) => void;
 }
 
@@ -100,6 +101,7 @@ export function useEditorHistory({
   onSliceMoveRef,
   onSlicesMoveRef,
   selectionRef,
+  setSelectionRef,
   setSelection,
 }: UseEditorHistoryOptions) {
   const [state, setState] = useState<HistoryState>(() => {
@@ -112,11 +114,11 @@ export function useEditorHistory({
 
   const stateRef = useRef<HistoryState>(state);
 
-  // Synchronize when initialGrid changes externally
-  const prevInitialGridRef = useRef<BwpxGrid | undefined>(initialGrid);
+  // Synchronize when initialGrid changes from outside (e.g. discard changes, repo sync, tab switch)
+  const lastCommittedRef = useRef<BwpxGrid | null>(initialGrid ?? null);
   useEffect(() => {
-    if (initialGrid && initialGrid !== prevInitialGridRef.current) {
-      prevInitialGridRef.current = initialGrid;
+    if (initialGrid && initialGrid !== lastCommittedRef.current) {
+      lastCommittedRef.current = initialGrid;
       const nextState: HistoryState = {
         history: [{ grid: initialGrid.clone(), selection: null }],
         index: 0,
@@ -133,6 +135,7 @@ export function useEditorHistory({
       sliceUpdates?: { id: string; prevX: number; prevY: number; newX: number; newY: number }[]
     ) => {
       const nextCloned = nextGrid.clone();
+      lastCommittedRef.current = nextCloned;
       const cur = stateRef.current;
       const trimmed = cur.history.slice(0, cur.index + 1);
 
@@ -156,17 +159,19 @@ export function useEditorHistory({
       };
       stateRef.current = nextState;
       setState(nextState);
-      if (explicitSelection !== undefined && setSelection) {
-        setSelection(explicitSelection);
+      const applySel = setSelectionRef?.current ?? setSelection;
+      if (explicitSelection !== undefined && applySel) {
+        applySel(explicitSelection);
       }
       onGridChange?.(nextCloned);
     },
-    [onGridChange, selectionRef, setSelection]
+    [onGridChange, selectionRef, setSelectionRef, setSelection]
   );
 
   const setGrid = useCallback(
     (nextGrid: BwpxGrid) => {
       const nextCloned = nextGrid.clone();
+      lastCommittedRef.current = nextCloned;
       const cur = stateRef.current;
       const copy = [...cur.history];
       copy[cur.index] = {
@@ -187,6 +192,7 @@ export function useEditorHistory({
   const resetGrid = useCallback(
     (nextGrid: BwpxGrid) => {
       const nextCloned = nextGrid.clone();
+      lastCommittedRef.current = nextCloned;
       const nextState: HistoryState = {
         history: [{ grid: nextCloned, selection: null }],
         index: 0,
@@ -205,6 +211,7 @@ export function useEditorHistory({
     const nextIndex = cur.index - 1;
     const targetEntry = cur.history[nextIndex];
     const targetGrid = targetEntry.grid.clone();
+    lastCommittedRef.current = targetGrid;
     const nextState: HistoryState = {
       ...cur,
       index: nextIndex,
@@ -212,8 +219,9 @@ export function useEditorHistory({
     stateRef.current = nextState;
     setState(nextState);
 
-    if (setSelection) {
-      setSelection(targetEntry.selection ? { ...targetEntry.selection } : null);
+    const applySel = setSelectionRef?.current ?? setSelection;
+    if (applySel) {
+      applySel(targetEntry.selection ? { ...targetEntry.selection } : null);
     }
 
     if (currentEntry.sliceUpdates && currentEntry.sliceUpdates.length > 0) {
@@ -234,7 +242,7 @@ export function useEditorHistory({
 
     onGridChange?.(targetGrid);
     return targetGrid;
-  }, [onGridChange, onSliceMoveRef, onSlicesMoveRef, setSelection]);
+  }, [onGridChange, onSliceMoveRef, onSlicesMoveRef, setSelectionRef, setSelection]);
 
   const redo = useCallback((): BwpxGrid | null => {
     const cur = stateRef.current;
@@ -242,6 +250,7 @@ export function useEditorHistory({
     const nextIndex = cur.index + 1;
     const targetEntry = cur.history[nextIndex];
     const targetGrid = targetEntry.grid.clone();
+    lastCommittedRef.current = targetGrid;
     const nextState: HistoryState = {
       ...cur,
       index: nextIndex,
@@ -249,8 +258,9 @@ export function useEditorHistory({
     stateRef.current = nextState;
     setState(nextState);
 
-    if (setSelection) {
-      setSelection(targetEntry.selection ? { ...targetEntry.selection } : null);
+    const applySel = setSelectionRef?.current ?? setSelection;
+    if (applySel) {
+      applySel(targetEntry.selection ? { ...targetEntry.selection } : null);
     }
 
     if (targetEntry.sliceUpdates && targetEntry.sliceUpdates.length > 0) {
@@ -271,7 +281,7 @@ export function useEditorHistory({
 
     onGridChange?.(targetGrid);
     return targetGrid;
-  }, [onGridChange, onSliceMoveRef, onSlicesMoveRef, setSelection]);
+  }, [onGridChange, onSliceMoveRef, onSlicesMoveRef, setSelectionRef, setSelection]);
 
   return {
     get grid() {
