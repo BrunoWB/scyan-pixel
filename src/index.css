@@ -2,7 +2,29 @@
 @import "tailwindcss";
 @import "@heroui/styles";
 
-:root {
+:root,
+[data-theme="dark"] {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+
+  /* Surface Elevation Foundation */
+  --background: #0b0d13;
+  --foreground: #f1f5f9;
+  --surface: #131722;
+  --surface-secondary: #19202f;
+  --surface-tertiary: #232c3f;
+  --field-background: #0e1118;
+  --border: #1e2538;
+  --border-secondary: #2d3748;
+
+  /* Primary Accent: Emerald (scyan-pixel brand) */
+  --primary: #00e5a3;
+  --primary-foreground: #0b0d13;
+  --primary-hover: #10f0b0;
+  --primary-active: #00c78e;
+  --primary-soft: rgba(0, 229, 163, 0.12);
+
+  /* Legacy & compatibility variables */
   --bg-dark: #0f1013;
   --panel-bg: #16181d;
   --panel-border: #232730;
@@ -17,13 +39,6 @@
   --grid-line: rgba(255, 255, 255, 0.05);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  user-select: none;
-}
-
 body {
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   background-color: var(--bg-dark);
@@ -36,18 +51,6 @@ body {
 /* OLED Pixel Editor custom styles */
 .font-mono-code {
   font-family: 'JetBrains Mono', monospace;
-}
-
-button {
-  background: none;
-  border: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  outline: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 
 /* Tooltip container */

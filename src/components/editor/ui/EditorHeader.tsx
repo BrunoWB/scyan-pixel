@@ -17,7 +17,7 @@ import { ColorPicker } from '../../ColorPicker';
 import { RecentPalette, type RecentPaletteHandle } from '../../RecentPalette';
 import { BackgroundPicker } from '../../BackgroundPicker';
 import { PeerAvatar } from './PeerAvatar';
-import type { ConnectedPeer } from '../../../core/peer/peerIdentity';
+import type { ConnectedPeer } from '../types';
 
 export interface EditorHeaderProps {
   title?: string;
@@ -60,6 +60,7 @@ export interface EditorHeaderProps {
   // Share & Peer Collaboration
   onOpenShareModal?: () => void;
   connectedPeers?: ConnectedPeer[];
+  showCollaboration?: boolean;
   // Room Storage / Canvas Actions
   onNewCanvas?: () => void;
   onOpenLoadModal?: () => void;
@@ -100,6 +101,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   canvasDimensions: _canvasDimensions,
   onOpenShareModal,
   connectedPeers = [],
+  showCollaboration = true,
   onNewCanvas,
   onOpenLoadModal,
 }) => {
@@ -319,58 +321,62 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           />
         )}
 
-        <div className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0" />
+        {showCollaboration && (
+          <>
+            <div className="h-5 w-[1px] bg-gradient-to-b from-transparent via-[#2c3344] to-transparent shrink-0" />
 
-        {/* Invite Button & Connected Peers next to it */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={onOpenShareModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] rounded-md text-xs text-slate-200 hover:text-white transition-all shadow-xs cursor-pointer active:scale-98"
-            title="Invite peers & manage session"
-            aria-label="Invite peers & manage session"
-          >
-            <UserPlus className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="hidden sm:inline font-medium">Invite</span>
-            {connectedPeers.length > 0 && (
-              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                {connectedPeers.length}
-              </span>
-            )}
-          </button>
+            {/* Invite Button & Connected Peers next to it */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={onOpenShareModal}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#141822] hover:bg-[#1c2230] border border-[#242b3d] hover:border-[#354058] rounded-md text-xs text-slate-200 hover:text-white transition-all shadow-xs cursor-pointer active:scale-98"
+                title="Invite peers & manage session"
+                aria-label="Invite peers & manage session"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline font-medium">Invite</span>
+                {connectedPeers && connectedPeers.length > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    {connectedPeers.length}
+                  </span>
+                )}
+              </button>
 
-          {/* Connected peers next to it (if any yet) */}
-          {connectedPeers.length > 0 && (
-            <div
-              className="flex items-center -space-x-1.5 pl-0.5 cursor-pointer"
-              onClick={onOpenShareModal}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onOpenShareModal?.();
-                }
-              }}
-              title={`${connectedPeers.length} connected peer(s)`}
-            >
-              {connectedPeers.slice(0, 4).map((peer) => (
-                <PeerAvatar
-                  key={peer.id}
-                  name={peer.name}
-                  color={peer.color}
-                  size="sm"
-                  showTooltip
-                />
-              ))}
-              {connectedPeers.length > 4 && (
-                <div className="w-6 h-6 rounded-full bg-[#1c2230] border border-[#2d374d] text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">
-                  +{connectedPeers.length - 4}
+              {/* Connected peers next to it (if any yet) */}
+              {connectedPeers && connectedPeers.length > 0 && (
+                <div
+                  className="flex items-center -space-x-1.5 pl-0.5 cursor-pointer"
+                  onClick={onOpenShareModal}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onOpenShareModal?.();
+                    }
+                  }}
+                  title={`${connectedPeers.length} connected peer(s)`}
+                >
+                  {connectedPeers.slice(0, 4).map((peer) => (
+                    <PeerAvatar
+                      key={peer.id}
+                      name={peer.name}
+                      color={peer.color}
+                      size="sm"
+                      showTooltip
+                    />
+                  ))}
+                  {connectedPeers.length > 4 && (
+                    <div className="w-6 h-6 rounded-full bg-[#1c2230] border border-[#2d374d] text-[10px] font-semibold text-slate-300 flex items-center justify-center shrink-0">
+                      +{connectedPeers.length - 4}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </header>
   );

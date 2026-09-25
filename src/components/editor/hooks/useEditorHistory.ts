@@ -70,15 +70,25 @@ export class EditorHistory {
   }
 }
 
+export interface HistoryEntry {
+  grid: BwpxGrid;
+  selection?: { x: number; y: number; w: number; h: number; active: boolean } | null;
+  sliceUpdates?: { id: string; prevX: number; prevY: number; newX: number; newY: number }[];
+}
+
 export interface UseEditorHistoryOptions {
   initialWidth?: number;
   initialHeight?: number;
   initialGrid?: BwpxGrid;
   onGridChange?: (grid: BwpxGrid) => void;
+  onSliceMoveRef?: React.MutableRefObject<((sliceId: string, newX: number, newY: number) => void) | undefined>;
+  onSlicesMoveRef?: React.MutableRefObject<((updates: { id: string; dx: number; dy: number }[]) => void) | undefined>;
+  selectionRef?: React.MutableRefObject<{ x: number; y: number; w: number; h: number; active: boolean } | null>;
+  setSelection?: (sel: { x: number; y: number; w: number; h: number; active: boolean } | null) => void;
 }
 
 interface HistoryState {
-  history: BwpxGrid[];
+  history: HistoryEntry[];
   index: number;
 }
 
@@ -87,11 +97,15 @@ export function useEditorHistory({
   initialHeight = 64,
   initialGrid,
   onGridChange,
+  onSliceMoveRef,
+  onSlicesMoveRef,
+  selectionRef,
+  setSelection,
 }: UseEditorHistoryOptions) {
   const [state, setState] = useState<HistoryState>(() => {
     const startGrid = initialGrid?.clone() ?? new BwpxGrid(initialWidth, initialHeight);
     return {
-      history: [startGrid],
+      history: [{ grid: startGrid, selection: null }],
       index: 0,
     };
   });
@@ -104,7 +118,7 @@ export function useEditorHistory({
     if (initialGrid && initialGrid !== prevInitialGridRef.current) {
       prevInitialGridRef.current = initialGrid;
       const nextState: HistoryState = {
-        history: [initialGrid.clone()],
+        history: [{ grid: initialGrid.clone(), selection: null }],
         index: 0,
       };
       stateRef.current = nextState;
@@ -113,11 +127,25 @@ export function useEditorHistory({
   }, [initialGrid]);
 
   const commitGrid = useCallback(
-    (nextGrid: BwpxGrid) => {
+    (
+      nextGrid: BwpxGrid,
+      explicitSelection?: { x: number; y: number; w: number; h: number; active: boolean } | null,
+      sliceUpdates?: { id: string; prevX: number; prevY: number; newX: number; newY: number }[]
+    ) => {
       const nextCloned = nextGrid.clone();
       const cur = stateRef.current;
       const trimmed = cur.history.slice(0, cur.index + 1);
-      trimmed.push(nextCloned);
+
+      const finalSelection = explicitSelection !== undefined
+        ? (explicitSelection ? { ...explicitSelection } : null)
+        : (selectionRef?.current ? { ...selectionRef.current } : null);
+
+      trimmed.push({
+        grid: nextCloned,
+        selection: finalSelection,
+        sliceUpdates,
+      });
+
       const history =
         trimmed.length > MAX_HISTORY_LENGTH
           ? trimmed.slice(trimmed.length - MAX_HISTORY_LENGTH)
@@ -128,9 +156,12 @@ export function useEditorHistory({
       };
       stateRef.current = nextState;
       setState(nextState);
+      if (explicitSelection !== undefined && setSelection) {
+        setSelection(explicitSelection);
+      }
       onGridChange?.(nextCloned);
     },
-    [onGridChange]
+    [onGridChange, selectionRef, setSelection]
   );
 
   const setGrid = useCallback(
@@ -138,7 +169,10 @@ export function useEditorHistory({
       const nextCloned = nextGrid.clone();
       const cur = stateRef.current;
       const copy = [...cur.history];
-      copy[cur.index] = nextCloned;
+      copy[cur.index] = {
+        ...copy[cur.index],
+        grid: nextCloned,
+      };
       const nextState: HistoryState = {
         ...cur,
         history: copy,
@@ -154,7 +188,7 @@ export function useEditorHistory({
     (nextGrid: BwpxGrid) => {
       const nextCloned = nextGrid.clone();
       const nextState: HistoryState = {
-        history: [nextCloned],
+        history: [{ grid: nextCloned, selection: null }],
         index: 0,
       };
       stateRef.current = nextState;
@@ -167,36 +201,81 @@ export function useEditorHistory({
   const undo = useCallback((): BwpxGrid | null => {
     const cur = stateRef.current;
     if (cur.index <= 0) return null;
+    const currentEntry = cur.history[cur.index];
     const nextIndex = cur.index - 1;
-    const targetGrid = cur.history[nextIndex];
+    const targetEntry = cur.history[nextIndex];
+    const targetGrid = targetEntry.grid.clone();
     const nextState: HistoryState = {
       ...cur,
       index: nextIndex,
     };
     stateRef.current = nextState;
     setState(nextState);
+
+    if (setSelection) {
+      setSelection(targetEntry.selection ? { ...targetEntry.selection } : null);
+    }
+
+    if (currentEntry.sliceUpdates && currentEntry.sliceUpdates.length > 0) {
+      if (onSlicesMoveRef?.current) {
+        onSlicesMoveRef.current(
+          currentEntry.sliceUpdates.map((u) => ({
+            id: u.id,
+            dx: u.prevX - u.newX,
+            dy: u.prevY - u.newY,
+          }))
+        );
+      } else if (onSliceMoveRef?.current) {
+        currentEntry.sliceUpdates.forEach((u) => {
+          onSliceMoveRef.current?.(u.id, u.prevX, u.prevY);
+        });
+      }
+    }
+
     onGridChange?.(targetGrid);
     return targetGrid;
-  }, [onGridChange]);
+  }, [onGridChange, onSliceMoveRef, onSlicesMoveRef, setSelection]);
 
   const redo = useCallback((): BwpxGrid | null => {
     const cur = stateRef.current;
     if (cur.index >= cur.history.length - 1) return null;
     const nextIndex = cur.index + 1;
-    const targetGrid = cur.history[nextIndex];
+    const targetEntry = cur.history[nextIndex];
+    const targetGrid = targetEntry.grid.clone();
     const nextState: HistoryState = {
       ...cur,
       index: nextIndex,
     };
     stateRef.current = nextState;
     setState(nextState);
+
+    if (setSelection) {
+      setSelection(targetEntry.selection ? { ...targetEntry.selection } : null);
+    }
+
+    if (targetEntry.sliceUpdates && targetEntry.sliceUpdates.length > 0) {
+      if (onSlicesMoveRef?.current) {
+        onSlicesMoveRef.current(
+          targetEntry.sliceUpdates.map((u) => ({
+            id: u.id,
+            dx: u.newX - u.prevX,
+            dy: u.newY - u.prevY,
+          }))
+        );
+      } else if (onSliceMoveRef?.current) {
+        targetEntry.sliceUpdates.forEach((u) => {
+          onSliceMoveRef.current?.(u.id, u.newX, u.newY);
+        });
+      }
+    }
+
     onGridChange?.(targetGrid);
     return targetGrid;
-  }, [onGridChange]);
+  }, [onGridChange, onSliceMoveRef, onSlicesMoveRef, setSelection]);
 
   return {
     get grid() {
-      return stateRef.current.history[stateRef.current.index] ?? stateRef.current.history[0];
+      return stateRef.current.history[stateRef.current.index]?.grid ?? stateRef.current.history[0]?.grid;
     },
     setGrid,
     commitGrid,

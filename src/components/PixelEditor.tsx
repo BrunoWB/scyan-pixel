@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { PixelGrid, PixelGrid as BwpxGrid, unpackCoord } from '../core/PixelGrid';
 import {
   drawLine,
@@ -12,6 +12,7 @@ import {
   renderBaseCanvas,
   renderOverlayCanvas,
   type GhostOverlay,
+  type SelectionOverlay,
 } from '../core/gridRenderer';
 import { ImageImportModal } from './ImageImportModal';
 import { CanvasContextMenu } from './CanvasContextMenu';
@@ -23,25 +24,26 @@ import {
   type ToolType,
   type ThemePreset,
   type BwpxEditorProps,
-  type BwpxEditorProps as PixelEditorProps,
+  type PixelEditorProps,
+  type SpriteSlice,
+  type EditorViewport,
+  type PixelEditorHandle,
   THEME_PRESETS,
   DEFAULT_PALETTE,
+  ZOOM_STEPS,
   WHEEL_ZOOM_THRESHOLD,
   processWheelZoomDelta,
+  calculateFitViewport,
+  calculateZoomAtPoint,
 } from './editor/types';
-import { useEditorHistory } from './editor/hooks/useEditorHistory';
+import { useEditorHistory, type HistoryEntry } from './editor/hooks/useEditorHistory';
 import { useViewport } from './editor/hooks/useViewport';
 import { useSelectionManager } from './editor/hooks/useSelectionManager';
-import { usePeerSession } from './editor/hooks/usePeerSession';
 import { EditorHeader } from './editor/ui/EditorHeader';
 import { EditorToolbar } from './editor/ui/EditorToolbar';
 import { EditorCanvas } from './editor/ui/EditorCanvas';
 import { EditorStatusBar } from './editor/ui/EditorStatusBar';
 import { ExportModal } from './editor/ui/ExportModal';
-import { ShareModal } from './editor/ui/ShareModal';
-import { RoomConflictModal } from './editor/ui/RoomConflictModal';
-import { RoomStorageModal } from './editor/ui/RoomStorageModal';
-import { RoomJoiningOverlay } from './editor/ui/RoomJoiningOverlay';
 import {
   diffGridPixels,
   applyPixelDeltas,
@@ -51,34 +53,55 @@ import {
   reconcileGridSnapshots,
   type CanvasMutationMessage,
   type CanvasSnapshotMessage,
-} from '../core/peer/peerCanvasSync';
-import {
-  loadRoomSnapshot,
-  type RoomSnapshotData,
-} from '../core/peer/peerRoomStorage';
-
+} from '../core/canvasSync';
+import type { RoomSnapshotData } from './editor/types';
 
 // Re-export public API symbols for complete backwards compatibility
-export type { ToolType, ThemePreset, BwpxEditorProps, PixelEditorProps };
+export type { ToolType, ThemePreset, BwpxEditorProps, PixelEditorProps, SpriteSlice, EditorViewport, HistoryEntry, PixelEditorHandle };
 // oxlint-disable-next-line react/only-export-components
-export { THEME_PRESETS, DEFAULT_PALETTE, WHEEL_ZOOM_THRESHOLD, processWheelZoomDelta, getContrastColor };
+export { THEME_PRESETS, DEFAULT_PALETTE, ZOOM_STEPS, WHEEL_ZOOM_THRESHOLD, processWheelZoomDelta, calculateFitViewport, calculateZoomAtPoint, getContrastColor };
 
-export const PixelEditor: React.FC<PixelEditorProps> = ({
-  initialWidth = 64,
-  initialHeight = 64,
-  initialGrid,
-  onGridChange,
-  title = 'SCYAN PIXEL EDITOR',
-  badgeText = 'PIXEL',
-  showPresets: _showPresets = true,
-  colorMode = 'palette',
-  defaultPixelColor = '#00e5a3',
-  defaultBgColor = '#0f1013',
-  initialDrawColor,
-  pixelColor: propPixelColor,
-  bgColor: propBgColor,
-  allowColorThemes = true,
-}) => {
+const EMPTY_SLICES: SpriteSlice[] = [];
+const EMPTY_SLICE_IDS: string[] = [];
+
+export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(function PixelEditor(
+  {
+    initialWidth = 64,
+    initialHeight = 64,
+    initialGrid,
+    onGridChange,
+    title = 'SCYAN PIXEL EDITOR',
+    badgeText = 'PIXEL',
+    showPresets: _showPresets = true,
+    colorMode = 'monochrome',
+    defaultPixelColor = '#ffffff',
+    defaultBgColor = '#000000',
+    initialDrawColor,
+    pixelColor: propPixelColor,
+    bgColor: propBgColor,
+    allowColorThemes = true,
+
+    // Slices & Atlas integration
+    slices = EMPTY_SLICES,
+    selectedSliceId = '',
+    selectedSliceIds = EMPTY_SLICE_IDS,
+    pendingSelection = null,
+    onSelectSlice,
+    onSelectSlices,
+    onNewSelection,
+    onSliceMove,
+    onSlicesMove,
+    onAddSlices,
+    onSlicesChange,
+    externalTool,
+    initialViewport,
+    onViewportChange,
+
+    // Optional collaboration adapter
+    collaboration,
+  },
+  forwardedRef
+) {
   // 1. Color & Theme State
   const isStrictMonochrome = Boolean(colorMode === 'monochrome' || (propPixelColor && !allowColorThemes));
   const customPixelColor = propPixelColor || (isStrictMonochrome ? '#ffffff' : defaultPixelColor);
@@ -94,7 +117,32 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   );
   const recentPaletteRef = useRef<RecentPaletteHandle>(null);
 
-  // 2. Editor History Hook (Undo/Redo)
+  // Callback refs to keep handlers fresh across re-renders
+  const slicesRef = useRef<SpriteSlice[]>(slices);
+  slicesRef.current = slices;
+  const selectedSliceIdRef = useRef<string>(selectedSliceId);
+  selectedSliceIdRef.current = selectedSliceId;
+  const selectedSliceIdsRef = useRef<string[]>(selectedSliceIds);
+  selectedSliceIdsRef.current = selectedSliceIds;
+
+  const onSelectSliceRef = useRef(onSelectSlice);
+  onSelectSliceRef.current = onSelectSlice;
+  const onSelectSlicesRef = useRef(onSelectSlices);
+  onSelectSlicesRef.current = onSelectSlices;
+  const onNewSelectionRef = useRef(onNewSelection);
+  onNewSelectionRef.current = onNewSelection;
+  const onSliceMoveRef = useRef(onSliceMove);
+  onSliceMoveRef.current = onSliceMove;
+  const onSlicesMoveRef = useRef(onSlicesMove);
+  onSlicesMoveRef.current = onSlicesMove;
+  const onAddSlicesRef = useRef(onAddSlices);
+  onAddSlicesRef.current = onAddSlices;
+  const onSlicesChangeRef = useRef(onSlicesChange);
+  onSlicesChangeRef.current = onSlicesChange;
+
+  const selectionRef = useRef<SelectionOverlay | null>(null);
+
+  // 2. Editor History Hook (Undo/Redo with slice updates)
   const {
     grid,
     commitGrid,
@@ -111,6 +159,9 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     initialHeight,
     initialGrid,
     onGridChange,
+    onSliceMoveRef,
+    onSlicesMoveRef,
+    selectionRef,
   });
 
   const gridRef = useRef<BwpxGrid>(grid);
@@ -138,7 +189,11 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     fitToView,
     getGridCoords,
     handleWheel,
-  } = useViewport({ containerRef });
+  } = useViewport({
+    containerRef,
+    initialViewport,
+    onViewportChange,
+  });
 
   const handleFitToScreen = useCallback(() => {
     fitToView(grid);
@@ -158,13 +213,74 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     cutSelection,
     pasteSelection,
     deleteSelection,
-    selectAll,
-    invertSelection,
-    nudgeSelection,
   } = useSelectionManager();
 
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
+
+  // Synchronize selection with slices from inspector or external props
+  useEffect(() => {
+    if (isMovingSelection) return;
+    if (pendingSelection) {
+      setSelection({
+        x: pendingSelection.x,
+        y: pendingSelection.y,
+        w: pendingSelection.width,
+        h: pendingSelection.height,
+        active: true,
+      });
+      return;
+    }
+    if (selectedSliceIds && selectedSliceIds.length > 0 && slices && slices.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      selectedSliceIds.forEach((id) => {
+        const s = slices.find((item) => item.id === id);
+        if (s) {
+          minX = Math.min(minX, s.x);
+          minY = Math.min(minY, s.y);
+          maxX = Math.max(maxX, s.x + s.width);
+          maxY = Math.max(maxY, s.y + s.height);
+        }
+      });
+      if (minX !== Infinity) {
+        setSelection({
+          x: minX,
+          y: minY,
+          w: maxX - minX,
+          h: maxY - minY,
+          active: true,
+        });
+        return;
+      }
+    }
+    if (selectedSliceId && slices && slices.length > 0) {
+      const slice = slices.find((s) => s.id === selectedSliceId);
+      if (slice) {
+        setSelection({
+          x: slice.x,
+          y: slice.y,
+          w: slice.width,
+          h: slice.height,
+          active: true,
+        });
+        return;
+      }
+    }
+    // Only clear selection if we are operating in slice mode (slices exist) and no slice is selected
+    if (slices && slices.length > 0 && !pendingSelection && (!selectedSliceIds || selectedSliceIds.length === 0) && !selectedSliceId) {
+      setSelection(null);
+    }
+  }, [selectedSliceId, selectedSliceIds, pendingSelection, slices, isMovingSelection, setSelection]);
+
   // 5. Tool & Interaction State
-  const [activeTool, setActiveTool] = useState<ToolType>('pencil');
+  const [activeTool, setActiveTool] = useState<ToolType>(externalTool || 'pencil');
+  useEffect(() => {
+    if (externalTool) {
+      setActiveTool(externalTool);
+    }
+  }, [externalTool]);
+
   const [brushSize, setBrushSize] = useState<number>(1);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
@@ -246,182 +362,25 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isHeaderHovered, setIsHeaderHovered] = useState<boolean>(false);
 
-  // 7. Peer Collaboration & Sharing State
+  // 7. Collaboration & Timestamps
   const pixelTimestampsRef = useRef<PixelTimestampTracker>(new PixelTimestampTracker());
   const discardLocalOnNextSnapshotRef = useRef<boolean>(false);
-  const peerSessionRef = useRef<ReturnType<typeof usePeerSession> | null>(null);
-
-  const handleRestoreSnapshot = useCallback(
-    (snapshot: RoomSnapshotData) => {
-      const next = new PixelGrid(
-        snapshot.width,
-        snapshot.height,
-        undefined,
-        undefined,
-        activeDrawColor
-      );
-      pixelTimestampsRef.current.clear(snapshot.updatedAt || Date.now());
-      for (const p of snapshot.pixels) {
-        if (p && p[2] && p[2] !== 'transparent' && p[2] !== 'none') {
-          next.set(p[0], p[1], 1, p[2]);
-        }
-        if (typeof p[3] === 'number') {
-          pixelTimestampsRef.current.set(p[0], p[1], p[3]);
-        }
-      }
-      gridRef.current = next;
-      resetGrid(next);
-      setGhost(null);
-      setSelection(null);
-      setFloatingPixels(null);
-      if (strokeGridRef.current) {
-        strokeGridRef.current = null;
-      }
-      fitToView(next);
-    },
-    [activeDrawColor, resetGrid, fitToView, setGhost, setSelection, setFloatingPixels]
-  );
-
-  const handleRemoteMutation = useCallback(
-    (mutation: CanvasMutationMessage) => {
-      if (mutation.type === 'clear') {
-        const now = mutation.timestamp ?? Date.now();
-        pixelTimestampsRef.current.clear(now);
-        const next = gridRef.current.clone();
-        next.clear();
-        if (strokeGridRef.current) {
-          strokeGridRef.current.clear();
-        }
-        gridRef.current = next;
-        setGrid(next);
-        peerSessionRef.current?.saveRoom(next, pixelTimestampsRef.current);
-        return;
-      }
-      if (mutation.type === 'pixels') {
-        const next = gridRef.current.clone();
-        applyPixelDeltas(next, mutation.pixels, pixelTimestampsRef.current);
-        if (strokeGridRef.current) {
-          applyPixelDeltas(strokeGridRef.current, mutation.pixels, pixelTimestampsRef.current);
-        }
-        gridRef.current = next;
-        setGrid(next);
-        peerSessionRef.current?.saveRoom(next, pixelTimestampsRef.current);
-      }
-    },
-    [setGrid]
-  );
-
-  const handleRemoteSnapshot = useCallback(
-    (snapshot: CanvasSnapshotMessage) => {
-      if (!snapshot || !Array.isArray(snapshot.pixels)) return;
-      const currentGrid = gridRef.current;
-      const isDiscard = discardLocalOnNextSnapshotRef.current;
-      discardLocalOnNextSnapshotRef.current = false;
-
-      if (isDiscard || currentGrid.countOn() === 0) {
-        const next = new PixelGrid(
-          snapshot.width || currentGrid.width,
-          snapshot.height || currentGrid.height,
-          undefined,
-          undefined,
-          activeDrawColor
-        );
-        pixelTimestampsRef.current.clear(snapshot.clearTimestamp ?? snapshot.timestamp ?? Date.now());
-        for (const p of snapshot.pixels) {
-          next.set(p[0], p[1], 1, p[2]);
-          const ts = p[3] ?? snapshot.timestamp ?? 0;
-          pixelTimestampsRef.current.set(p[0], p[1], ts);
-        }
-        if (strokeGridRef.current) {
-          strokeGridRef.current = next.clone();
-        }
-        gridRef.current = next;
-        setGrid(next);
-        peerSessionRef.current?.saveRoom(next, pixelTimestampsRef.current);
-        return;
-      }
-
-      // Merge remote snapshot with local offline edits using LWW per-pixel
-      const next = currentGrid.clone();
-      const result = reconcileGridSnapshots(next, pixelTimestampsRef.current, snapshot);
-      if (result.appliedDeltas.length > 0) {
-        if (strokeGridRef.current) {
-          strokeGridRef.current = next.clone();
-        }
-        gridRef.current = next;
-        setGrid(next);
-        peerSessionRef.current?.saveRoom(next, pixelTimestampsRef.current);
-      }
-    },
-    [activeDrawColor, setGrid]
-  );
-
-  const handleGetSnapshot = useCallback((): CanvasSnapshotMessage => {
-    const pixelsWithTs: [number, number, string, number][] = [];
-    gridRef.current.forEachPixel((x, y, color) => {
-      const ts = pixelTimestampsRef.current.get(x, y);
-      pixelsWithTs.push([x, y, color, ts]);
-    });
-    const deletedPixels: [number, number, number][] = [];
-    const clearTs = pixelTimestampsRef.current.getClearTime();
-    for (const [key, ts] of pixelTimestampsRef.current.getMap().entries()) {
-      const [x, y] = unpackCoord(key);
-      if (!gridRef.current.get(x, y) && ts > clearTs) {
-        deletedPixels.push([x, y, ts]);
-      }
-    }
-    return {
-      type: 'snapshot',
-      width: gridRef.current.width,
-      height: gridRef.current.height,
-      pixels: pixelsWithTs,
-      deletedPixels: deletedPixels.length > 0 ? deletedPixels : undefined,
-      count: gridRef.current.countOn(),
-      timestamp: Date.now(),
-      clearTimestamp: clearTs,
-    };
-  }, []);
-
-  const peerSession = usePeerSession({
-    onRemoteMutation: handleRemoteMutation,
-    onRemoteSnapshot: handleRemoteSnapshot,
-    onGetSnapshot: handleGetSnapshot,
-    onRestoreSnapshot: handleRestoreSnapshot,
-    onDiscardLocalConflict: () => {
-      discardLocalOnNextSnapshotRef.current = true;
-    },
-    getCurrentGrid: () => gridRef.current,
-    getCurrentTimestamps: () => pixelTimestampsRef.current,
-  });
-
-  useEffect(() => {
-    peerSessionRef.current = peerSession;
-  }, [peerSession]);
-
-  // Load initial local room snapshot if URL hash specified a room that has a saved snapshot
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.location?.hash) return;
-    const match = window.location.hash.match(/#room=([a-zA-Z0-9_-]+)/);
-    if (match && match[1]) {
-      void loadRoomSnapshot(match[1]).then((saved) => {
-        if (saved && saved.pixels.length > 0 && gridRef.current.countOn() === 0) {
-          handleRestoreSnapshot(saved);
-        }
-      });
-    }
-  }, [handleRestoreSnapshot]);
 
   const commitAndBroadcast = useCallback(
-    (nextGrid: BwpxGrid) => {
-      peerSession.ensureActiveRoom(nextGrid);
+    (
+      nextGrid: BwpxGrid,
+      explicitSelection?: SelectionOverlay | null,
+      sliceUpdates?: { id: string; prevX: number; prevY: number; newX: number; newY: number }[]
+    ) => {
+      collaboration?.ensureActiveRoom?.(nextGrid);
       const prev = gridRef.current;
       gridRef.current = nextGrid;
-      commitGrid(nextGrid);
+      commitGrid(nextGrid, explicitSelection, sliceUpdates);
       const now = Date.now();
       if (nextGrid.countOn() === 0 && prev.countOn() > 0) {
         pixelTimestampsRef.current.clear(now);
-        peerSession.broadcastClear();
-        peerSession.saveRoom(nextGrid, pixelTimestampsRef.current);
+        collaboration?.broadcastClear?.();
+        collaboration?.saveRoom?.(nextGrid, pixelTimestampsRef.current);
         return;
       }
       const diff = diffGridPixels(prev, nextGrid, now);
@@ -429,15 +388,15 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         for (let i = 0; i < diff.length; i++) {
           pixelTimestampsRef.current.set(diff[i][0], diff[i][1], now);
         }
-        peerSession.broadcastPixels(diff);
+        collaboration?.broadcastPixels?.(diff);
       }
-      peerSession.saveRoom(nextGrid, pixelTimestampsRef.current);
+      collaboration?.saveRoom?.(nextGrid, pixelTimestampsRef.current);
     },
-    [commitGrid, peerSession]
+    [commitGrid, collaboration]
   );
 
   const handleUndo = useCallback(() => {
-    peerSession.ensureActiveRoom();
+    collaboration?.ensureActiveRoom?.();
     const prev = gridRef.current;
     const next = undo();
     if (next) {
@@ -448,15 +407,15 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         for (let i = 0; i < diff.length; i++) {
           pixelTimestampsRef.current.set(diff[i][0], diff[i][1], now);
         }
-        peerSession.broadcastPixels(diff);
+        collaboration?.broadcastPixels?.(diff);
       }
-      peerSession.saveRoom(next, pixelTimestampsRef.current);
+      collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
     }
     setGhost(null);
-  }, [undo, peerSession]);
+  }, [undo, collaboration]);
 
   const handleRedo = useCallback(() => {
-    peerSession.ensureActiveRoom();
+    collaboration?.ensureActiveRoom?.();
     const prev = gridRef.current;
     const next = redo();
     if (next) {
@@ -467,18 +426,14 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         for (let i = 0; i < diff.length; i++) {
           pixelTimestampsRef.current.set(diff[i][0], diff[i][1], now);
         }
-        peerSession.broadcastPixels(diff);
+        collaboration?.broadcastPixels?.(diff);
       }
-      peerSession.saveRoom(next, pixelTimestampsRef.current);
+      collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
     }
     setGhost(null);
-  }, [redo, peerSession]);
+  }, [redo, collaboration]);
 
   const handleNewCanvas = useCallback(() => {
-    // 1. Snapshot/save the current room state into local save files if it had content or was saved before
-    void peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
-
-    // 2. Reset the canvas to blank
     const blankGrid = new PixelGrid(
       gridRef.current.width,
       gridRef.current.height,
@@ -496,34 +451,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       strokeGridRef.current = null;
     }
     fitToView(blankGrid);
-
-    // 3. Generate a new room with a new name (<user-name>-<action>) and new roomUuid
-    // We defer saving the room snapshot until something is actually drawn or modified in it.
-    peerSession.generateNewRoom();
-  }, [activeDrawColor, peerSession, resetGrid, fitToView, setGhost, setSelection, setFloatingPixels]);
-
-  const handleLoadRoom = useCallback(
-    (roomName: string) => {
-      // Snapshot current work before switching if it had content or was saved before
-      void peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
-      void peerSession.restoreRoom(roomName);
-      peerSession.closeLoadModal();
-      peerSession.closeShareModal();
-    },
-    [peerSession]
-  );
-
-  const handleCopyToNewSave = useCallback(
-    (roomName: string) => {
-      // Snapshot current work before switching if it had content or was saved before
-      void peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current, peerSession.roomId);
-      void peerSession.copyRoomToNewSave(roomName);
-      peerSession.closeLoadModal();
-      peerSession.closeShareModal();
-    },
-    [peerSession]
-  );
-
+  }, [activeDrawColor, resetGrid, fitToView, setSelection, setFloatingPixels]);
 
   // File import ref and trigger
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -559,7 +487,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     }
   };
 
-  // Redraw Base Canvas when grid, zoom, pan, or colors change
+  // Redraw Base Canvas when grid, zoom, pan, colors, or slices change
   useEffect(() => {
     const canvas = baseCanvasRef.current;
     if (!canvas) return;
@@ -584,8 +512,11 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       showGridLines: zoom >= 4,
       showAxes: true,
       frameBounds: null,
+      slices,
+      selectedSliceId,
+      selectedSliceIds,
     });
-  }, [grid, zoom, pan, activePixelColor, activeBgColor, isStrictMonochrome]);
+  }, [grid, zoom, pan, activePixelColor, activeBgColor, isStrictMonochrome, slices, selectedSliceId, selectedSliceIds]);
 
   // Redraw Overlay Canvas on ephemeral interaction changes via rAF
   const scheduleOverlayRender = useCallback(() => {
@@ -642,20 +573,118 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     scheduleOverlayRender();
   }, [scheduleOverlayRender]);
 
-  const handleSaveJSONFileRef = useRef<() => void>(() => {});
+  // Arrow Key Move Active Selection and Slices
+  const lastArrowTimeRef = useRef<number>(0);
+  const moveActiveSelection = useCallback(
+    (dx: number, dy: number, _isRepeat: boolean = false) => {
+      const currentSel = selection;
+      if (!currentSel || !currentSel.active) return;
+
+      const curGrid = gridRef.current;
+      const currentSlices = slicesRef.current || [];
+      const currentSelectedSliceIds = selectedSliceIdsRef.current || [];
+      const currentSelectedSliceId = selectedSliceIdRef.current;
+
+      const activeIds = currentSelectedSliceIds.length > 0
+        ? currentSelectedSliceIds
+        : (currentSelectedSliceId ? [currentSelectedSliceId] : []);
+
+      let sliceRects: { x: number; y: number; w: number; h: number }[] = [];
+      let extracted: [number, number, string][] = [];
+      const next = curGrid.clone();
+
+      if (activeIds.length > 0) {
+        activeIds.forEach((id) => {
+          const s = currentSlices.find((item) => item.id === id);
+          if (s) {
+            sliceRects.push({ x: s.x, y: s.y, w: s.width, h: s.height });
+            const spx = curGrid.extractColoredRect(s);
+            spx.forEach(([rx, ry, col]) => {
+              extracted.push([s.x + rx - currentSel.x, s.y + ry - currentSel.y, col]);
+            });
+            next.clearRect(s);
+          }
+        });
+      } else {
+        sliceRects.push({ x: currentSel.x, y: currentSel.y, w: currentSel.w, h: currentSel.h });
+        extracted = curGrid.extractColoredRect(currentSel);
+        next.clearRect(currentSel);
+      }
+
+      const targetX = currentSel.x + dx;
+      const targetY = currentSel.y + dy;
+
+      if (sliceRects.length > 0) {
+        sliceRects.forEach((sr) => {
+          next.clearRect({
+            x: sr.x + dx,
+            y: sr.y + dy,
+            w: sr.w,
+            h: sr.h,
+          });
+        });
+      } else {
+        next.clearRect({
+          x: targetX,
+          y: targetY,
+          w: currentSel.w,
+          h: currentSel.h,
+        });
+      }
+
+      extracted.forEach(([relX, relY, col]) => {
+        next.set(targetX + relX, targetY + relY, 1, col);
+      });
+
+      const newSelection: SelectionOverlay = {
+        x: targetX,
+        y: targetY,
+        w: currentSel.w,
+        h: currentSel.h,
+        active: true,
+      };
+
+      const sliceUpdates: { id: string; prevX: number; prevY: number; newX: number; newY: number }[] = [];
+      if (activeIds.length > 0) {
+        activeIds.forEach((id) => {
+          const s = currentSlices.find((item) => item.id === id);
+          if (s) {
+            sliceUpdates.push({
+              id,
+              prevX: s.x,
+              prevY: s.y,
+              newX: s.x + dx,
+              newY: s.y + dy,
+            });
+          }
+        });
+      }
+
+      commitAndBroadcast(next, newSelection, sliceUpdates.length > 0 ? sliceUpdates : undefined);
+      setSelection(newSelection);
+
+      if (sliceUpdates.length > 0) {
+        if (onSlicesMoveRef.current) {
+          onSlicesMoveRef.current(sliceUpdates.map((u) => ({ id: u.id, dx, dy })));
+        } else if (onSliceMoveRef.current) {
+          sliceUpdates.forEach((u) => onSliceMoveRef.current?.(u.id, u.newX, u.newY));
+        }
+      } else if (pendingSelection) {
+        onNewSelectionRef.current?.({
+          x: targetX,
+          y: targetY,
+          width: currentSel.w,
+          height: currentSel.h,
+        });
+      }
+    },
+    [commitAndBroadcast, selection, pendingSelection, setSelection]
+  );
 
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        modalContent ||
-        isImportModalOpen ||
-        peerSession.isShareModalOpen ||
-        peerSession.isLoadModalOpen ||
-        peerSession.roomJoinStatus === 'connecting' ||
-        peerSession.roomJoinStatus === 'timed_out'
-      )
-        return;
+      if (modalContent || isImportModalOpen) return;
 
       if (e.key === 'Escape') {
         if (ghostPlacementRef.current) {
@@ -664,6 +693,26 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         }
         if (selection && selection.active) {
           setSelection(null);
+          return;
+        }
+      }
+
+      // Arrow Keys to Move Active Selection
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        if (selection && selection.active && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+          e.preventDefault();
+          const step = e.shiftKey ? 8 : 1;
+          let dx = 0;
+          let dy = 0;
+          if (e.key === 'ArrowUp') dy = -step;
+          if (e.key === 'ArrowDown') dy = step;
+          if (e.key === 'ArrowLeft') dx = -step;
+          if (e.key === 'ArrowRight') dx = step;
+
+          const now = Date.now();
+          const isRepeat = e.repeat || now - lastArrowTimeRef.current < 250;
+          lastArrowTimeRef.current = now;
+          moveActiveSelection(dx, dy, isRepeat);
           return;
         }
       }
@@ -726,7 +775,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       if (k === 'b' || k === 'p') setActiveTool('pencil');
       else if (k === 'e') setActiveTool('eraser');
       else if (k === 'g') setActiveTool('bucket');
-      else if (k === 'i') setActiveTool('eyedropper');
+      else if (k === 'i' && !isStrictMonochrome) setActiveTool('eyedropper');
       else if (k === 'm') setActiveTool('select');
       else if (k === 'v') setActiveTool('move');
       else if (k === 'l') {
@@ -748,110 +797,11 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         setBrushSize((prev) => Math.min(64, prev + 1));
         return;
       }
-
-      // Save shortcut: Ctrl+S / Cmd+S
-      if ((e.ctrlKey || e.metaKey) && k === 's') {
-        e.preventDefault();
-        handleSaveJSONFileRef.current?.();
-        return;
-      }
-
-      // Clipboard shortcuts
-      if ((e.ctrlKey || e.metaKey) && k === 'c') {
-        e.preventDefault();
-        copySelection(grid);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && k === 'x') {
-        e.preventDefault();
-        cutSelection(grid, commitAndBroadcast);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && k === 'v') {
-        e.preventDefault();
-        const container = containerRef.current;
-        const vpW = container?.clientWidth || 400;
-        const vpH = container?.clientHeight || 400;
-        const fallbackPos = {
-          x: Math.round((-pan.x + vpW / 2) / zoom - 16),
-          y: Math.round((-pan.y + vpH / 2) / zoom - 16),
-        };
-        pasteSelection(grid, commitAndBroadcast, activeDrawColor, fallbackPos);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && k === 'a') {
-        e.preventDefault();
-        selectAll(grid);
-        return;
-      }
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selection && selection.active) {
-          e.preventDefault();
-          deleteSelection(grid, commitAndBroadcast);
-          return;
-        }
-      }
-
-      // Arrow keys: nudge selection or canvas
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        e.preventDefault();
-        const step = e.shiftKey ? 8 : 1;
-        let dx = 0;
-        let dy = 0;
-        if (e.key === 'ArrowUp') dy = -step;
-        if (e.key === 'ArrowDown') dy = step;
-        if (e.key === 'ArrowLeft') dx = -step;
-        if (e.key === 'ArrowRight') dx = step;
-
-        if (selection && selection.active) {
-          nudgeSelection(dx, dy, grid);
-        } else {
-          const next = new PixelGrid(grid.width, grid.height);
-          grid.forEachPixel((x, y) => {
-            const tx = x + dx;
-            const ty = y + dy;
-            if (tx >= 0 && tx < grid.width && ty >= 0 && ty < grid.height) {
-              next.set(tx, ty, 1);
-            }
-          });
-          commitAndBroadcast(next);
-        }
-      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         setIsSpaceHeld(false);
-        setIsPanning(false);
-      }
-      if (['Shift', 'Control', 'Meta'].includes(e.key)) {
-        if (isDrawingRef.current && startPosRef.current && currentCoordsRef.current) {
-          const shiftKey = e.key === 'Shift' ? false : e.shiftKey;
-          const ctrlKey = e.key === 'Control' || e.key === 'Meta' ? false : e.ctrlKey || e.metaKey;
-          const curTool = activeToolRef.current;
-          if (curTool === 'select') {
-            const endpoints = calculateShapeEndpoints('select', startPosRef.current, currentCoordsRef.current, {
-              shiftKey,
-              ctrlKey,
-            });
-            const minX = Math.min(endpoints.x0, endpoints.x1);
-            const minY = Math.min(endpoints.y0, endpoints.y1);
-            const maxX = Math.max(endpoints.x0, endpoints.x1);
-            const maxY = Math.max(endpoints.y0, endpoints.y1);
-            setSelection({
-              x: minX,
-              y: minY,
-              w: maxX - minX + 1,
-              h: maxY - minY + 1,
-              active: true,
-            });
-          } else if (isShapeTool(curTool)) {
-            updateShapePreviewRef.current(startPosRef.current, currentCoordsRef.current, {
-              shiftKey,
-              ctrlKey,
-            });
-          }
-        }
       }
     };
 
@@ -864,40 +814,41 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   }, [
     modalContent,
     isImportModalOpen,
-    peerSession.isShareModalOpen,
-    peerSession.isLoadModalOpen,
+    selection,
     handleUndo,
     handleRedo,
-    isSpaceHeld,
-    selection,
-    grid,
-    commitAndBroadcast,
     setIsSpaceHeld,
-    setIsPanning,
-    copySelection,
-    cutSelection,
-    pasteSelection,
-    selectAll,
-    deleteSelection,
-    nudgeSelection,
-    activeDrawColor,
-    pan,
-    zoom,
+    moveActiveSelection,
     setSelection,
-    peerSession.roomJoinStatus,
+    isStrictMonochrome,
   ]);
 
-  // Transformations
-  const handleInvert = () => invertSelection(grid, commitAndBroadcast);
-  const handleFlipH = () => commitAndBroadcast(grid.flipH(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
-  const handleFlipV = () => commitAndBroadcast(grid.flipV(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
-  const handleRotate90 = () => commitAndBroadcast(grid.rotate90(selection?.active ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h } : undefined));
+  // Context Menu operations
+  const handleInvert = () => {
+    const next = grid.invert(
+      selection && selection.active ? selection : undefined,
+      activeDrawColor
+    );
+    commitAndBroadcast(next);
+  };
 
-  // Pointer Interaction Handlers
+  const handleFlipH = () => {
+    const next = grid.flipHorizontal(selection && selection.active ? selection : undefined);
+    commitAndBroadcast(next);
+  };
+
+  const handleFlipV = () => {
+    const next = grid.flipVertical(selection && selection.active ? selection : undefined);
+    commitAndBroadcast(next);
+  };
+
+  const handleRotate90 = () => {
+    const next = grid.rotate90(selection && selection.active ? selection : undefined);
+    commitAndBroadcast(next);
+  };
+
+  // Pointer interactions on Canvas
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (peerSession.roomJoinStatus === 'connecting' || peerSession.roomJoinStatus === 'timed_out') {
-      return;
-    }
     if (ghostPlacementRef.current) {
       if (e.button === 0) {
         const gp = ghostPlacementRef.current;
@@ -913,6 +864,33 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
             const row = Math.floor(i / cols);
             next.blit(frame.grid, targetX + col * frameW, targetY + row * frameH, true);
           });
+
+          if (onAddSlicesRef.current || onSlicesChangeRef.current) {
+            const rawName = gp.gifData.name || 'ANIM';
+            const cleanId = rawName.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+            const newSlices: SpriteSlice[] = gp.gifData.frames.map((_, i) => ({
+              id: i === 0 ? cleanId : `${cleanId}_SUB_${i}`,
+              name: i === 0 ? rawName : undefined,
+              groupId: cleanId,
+              groupOrder: i + 1,
+              x: targetX + (i % cols) * frameW,
+              y: targetY + Math.floor(i / cols) * frameH,
+              width: frameW,
+              height: frameH,
+              color: '#38bdf8',
+            }));
+            if (onAddSlicesRef.current) {
+              onAddSlicesRef.current(newSlices);
+            } else if (onSlicesChangeRef.current) {
+              onSlicesChangeRef.current([...(slicesRef.current || []), ...newSlices]);
+            }
+            if (onSelectSlicesRef.current) {
+              onSelectSlicesRef.current(newSlices.map((s) => s.id));
+            } else if (onSelectSliceRef.current && newSlices[0]) {
+              onSelectSliceRef.current(newSlices[0].id);
+            }
+          }
+
           commitAndBroadcast(next);
           setSelection({
             x: targetX,
@@ -931,6 +909,12 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
             h: gp.height,
             active: true,
           });
+          onNewSelectionRef.current?.({
+            x: targetX,
+            y: targetY,
+            width: gp.width,
+            height: gp.height,
+          });
         }
         setGhostPlacement(null);
       } else if (e.button === 2) {
@@ -941,7 +925,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
 
     if (e.button === 2) {
       if (activeTool === 'pencil') {
-        peerSession.ensureActiveRoom();
+        collaboration?.ensureActiveRoom?.();
         const coords = getGridCoords(e.clientX, e.clientY);
         const { x, y } = coords;
         const next = grid.clone();
@@ -957,8 +941,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         commitGrid(next);
         const now = Date.now();
         pixelTimestampsRef.current.set(x, y, now);
-        peerSession.broadcastPixels(getBrushDotPixels(x, y, brushSize, null, now));
-        peerSession.saveRoom(next, pixelTimestampsRef.current);
+        collaboration?.broadcastPixels?.(getBrushDotPixels(x, y, brushSize, null, now));
+        collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
         return;
       }
       setContextMenu({ x: e.clientX, y: e.clientY });
@@ -989,30 +973,94 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       return;
     }
 
-    // Floating selection move
-    if (
-      (activeTool === 'move' || activeTool === 'select') &&
+    const clickedSlice = slicesRef.current?.find(
+      (s) => x >= s.x && x < s.x + s.width && y >= s.y && y < s.y + s.height
+    );
+
+    // Floating selection or slice move
+    const isInsideSel = Boolean(
       selection &&
       selection.active &&
       x >= selection.x &&
       x < selection.x + selection.w &&
       y >= selection.y &&
       y < selection.y + selection.h
-    ) {
-      const extracted = grid.extractColoredRect(selection);
-      setFloatingPixels(extracted);
-      setGhost({
-        pixels: extracted,
-        x: selection.x,
-        y: selection.y,
-        w: selection.w,
-        h: selection.h,
-        showOutline: true,
-        showBackdrop: true,
-      });
-      setIsMovingSelection(true);
-      setMoveStartPos({ x, y });
-      return;
+    );
+
+    if ((activeTool === 'move' || activeTool === 'select' || e.shiftKey) && (clickedSlice || isInsideSel)) {
+      const initialIds = (selectedSliceIdsRef.current && selectedSliceIdsRef.current.length > 0)
+        ? selectedSliceIdsRef.current
+        : (selectedSliceIdRef.current ? [selectedSliceIdRef.current] : []);
+      let currentIds = new Set<string>(initialIds);
+      if (clickedSlice) {
+        if (e.ctrlKey || e.metaKey) {
+          if (currentIds.has(clickedSlice.id)) {
+            currentIds.delete(clickedSlice.id);
+          } else {
+            currentIds.add(clickedSlice.id);
+          }
+        } else {
+          currentIds = new Set([clickedSlice.id]);
+        }
+        const allIds = Array.from(currentIds);
+        if (onSelectSlicesRef.current) {
+          onSelectSlicesRef.current(allIds);
+        }
+        onSelectSliceRef.current?.(clickedSlice.id, Boolean(e.ctrlKey || e.metaKey));
+      }
+
+      const activeSlices = (slicesRef.current || []).filter((s) => currentIds.has(s.id));
+      let selRect = selection;
+      let sliceRects: { x: number; y: number; w: number; h: number }[] = [];
+
+      if (activeSlices.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        activeSlices.forEach((s) => {
+          minX = Math.min(minX, s.x);
+          minY = Math.min(minY, s.y);
+          maxX = Math.max(maxX, s.x + s.width);
+          maxY = Math.max(maxY, s.y + s.height);
+          sliceRects.push({ x: s.x, y: s.y, w: s.width, h: s.height });
+        });
+        selRect = { x: minX, y: minY, w: maxX - minX, h: maxY - minY, active: true };
+        setSelection(selRect);
+      } else if (selRect) {
+        sliceRects.push({ x: selRect.x, y: selRect.y, w: selRect.w, h: selRect.h });
+      }
+
+      if (selRect) {
+        let extracted: [number, number, string][] = [];
+        if (activeSlices.length > 0) {
+          activeSlices.forEach((s) => {
+            const spx = grid.extractColoredRect(s);
+            spx.forEach(([rx, ry, col]) => {
+              extracted.push([s.x + rx - selRect!.x, s.y + ry - selRect!.y, col]);
+            });
+          });
+        } else {
+          extracted = grid.extractColoredRect(selRect);
+        }
+
+        setFloatingPixels(extracted);
+        setGhost({
+          pixels: extracted,
+          x: selRect.x,
+          y: selRect.y,
+          w: selRect.w,
+          h: selRect.h,
+          rects: sliceRects.length > 1 ? sliceRects.map((sr) => ({
+            x: sr.x - selRect!.x,
+            y: sr.y - selRect!.y,
+            w: sr.w,
+            h: sr.h,
+          })) : undefined,
+          showOutline: true,
+          showBackdrop: true,
+        });
+        setIsMovingSelection(true);
+        setMoveStartPos({ x, y });
+        return;
+      }
     }
 
     // Clear existing selection if starting to draw with non-selection tools
@@ -1028,7 +1076,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     }
 
     if (activeTool === 'bucket') {
-      peerSession.ensureActiveRoom();
+      collaboration?.ensureActiveRoom?.();
       const next = grid.clone();
       floodFill(next, x, y, 1, activeDrawColor);
       commitAndBroadcast(next);
@@ -1037,7 +1085,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     }
 
     if (activeTool === 'pencil' || activeTool === 'eraser') {
-      peerSession.ensureActiveRoom();
+      collaboration?.ensureActiveRoom?.();
       const next = grid.clone();
       const val = activeTool === 'eraser' ? 0 : 1;
       drawBrushDot(next, x, y, val, brushSize, activeDrawColor);
@@ -1048,16 +1096,16 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       commitGrid(next);
       const now = Date.now();
       pixelTimestampsRef.current.set(x, y, now);
-      peerSession.broadcastPixels(
+      collaboration?.broadcastPixels?.(
         getBrushDotPixels(x, y, brushSize, val === 0 ? null : activeDrawColor, now)
       );
-      peerSession.saveRoom(next, pixelTimestampsRef.current);
+      collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
       if (val === 1) recentPaletteRef.current?.pushColor(activeDrawColor);
       return;
     }
 
     // Shape tools begin dragging preview
-    peerSession.ensureActiveRoom();
+    collaboration?.ensureActiveRoom?.();
     setIsDrawing(true);
     isDrawingRef.current = true;
   };
@@ -1126,7 +1174,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
           for (const lp of linePixels) {
             pixelTimestampsRef.current.set(lp[0], lp[1], now);
           }
-          peerSession.broadcastPixels(linePixels);
+          collaboration?.broadcastPixels?.(linePixels);
           startPosRef.current = coords;
           setStartPos(coords);
           gridRef.current = strokeGridRef.current;
@@ -1169,27 +1217,156 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       return;
     }
 
+    const coords = getGridCoords(e.clientX, e.clientY);
+    currentCoordsRef.current = coords;
+
     if (isMovingSelection && ghost && selection) {
+      const dx = ghost.x - selection.x;
+      const dy = ghost.y - selection.y;
       const next = grid.clone();
-      next.clearRect(selection);
+
+      const activeIds = selectedSliceIdsRef.current && selectedSliceIdsRef.current.length > 0
+        ? selectedSliceIdsRef.current
+        : (selectedSliceIdRef.current ? [selectedSliceIdRef.current] : []);
+      const currentSlices = slicesRef.current || [];
+      const activeSlices = currentSlices.filter((s) => activeIds.includes(s.id));
+
+      if (activeSlices.length > 0) {
+        activeSlices.forEach((s) => {
+          next.clearRect(s);
+        });
+        activeSlices.forEach((s) => {
+          next.clearRect({ x: s.x + dx, y: s.y + dy, w: s.width, h: s.height });
+        });
+      } else {
+        next.clearRect(selection);
+        next.clearRect({ x: ghost.x, y: ghost.y, w: ghost.w, h: ghost.h });
+      }
+
       ghost.pixels.forEach((p) => {
         const rx = p[0];
         const ry = p[1];
         const color = p[2] || activeDrawColor;
         next.set(ghost.x + rx, ghost.y + ry, 1, color);
       });
-      commitAndBroadcast(next);
-      setSelection({
+
+      const newSel: SelectionOverlay = {
         x: ghost.x,
         y: ghost.y,
         w: ghost.w,
         h: ghost.h,
         active: true,
-      });
+      };
+
+      const sliceUpdates: { id: string; prevX: number; prevY: number; newX: number; newY: number }[] = [];
+      if (activeSlices.length > 0) {
+        activeSlices.forEach((s) => {
+          sliceUpdates.push({
+            id: s.id,
+            prevX: s.x,
+            prevY: s.y,
+            newX: s.x + dx,
+            newY: s.y + dy,
+          });
+        });
+      }
+
+      commitAndBroadcast(next, newSel, sliceUpdates.length > 0 ? sliceUpdates : undefined);
+      setSelection(newSel);
+
+      if (sliceUpdates.length > 0) {
+        if (onSlicesMoveRef.current) {
+          onSlicesMoveRef.current(sliceUpdates.map((u) => ({ id: u.id, dx, dy })));
+        } else if (onSliceMoveRef.current) {
+          sliceUpdates.forEach((u) => onSliceMoveRef.current?.(u.id, u.newX, u.newY));
+        }
+      } else if (pendingSelection) {
+        onNewSelectionRef.current?.({
+          x: newSel.x,
+          y: newSel.y,
+          width: newSel.w,
+          height: newSel.h,
+        });
+      }
+
       setGhost(null);
       setIsMovingSelection(false);
       setFloatingPixels(null);
       return;
+    }
+
+    if (activeTool === 'select' && startPos) {
+      const hasDragged = Math.abs(coords.x - startPos.x) > 0 || Math.abs(coords.y - startPos.y) > 0;
+      setIsDrawing(false);
+      isDrawingRef.current = false;
+      startPosRef.current = null;
+      strokeGridRef.current = null;
+      setGhost(null);
+
+      if (!hasDragged) {
+        const clickedSlice = slicesRef.current?.find(
+          (s) => startPos.x >= s.x && startPos.x < s.x + s.width && startPos.y >= s.y && startPos.y < s.y + s.height
+        );
+        if (clickedSlice) {
+          const isMulti = Boolean(e.ctrlKey || e.metaKey);
+          onSelectSliceRef.current?.(clickedSlice.id, isMulti);
+          if (onSelectSlicesRef.current) {
+            onSelectSlicesRef.current([clickedSlice.id]);
+          }
+          setSelection({
+            x: clickedSlice.x,
+            y: clickedSlice.y,
+            w: clickedSlice.width,
+            h: clickedSlice.height,
+            active: true,
+          });
+          onNewSelectionRef.current?.(null);
+          return;
+        } else {
+          onSelectSliceRef.current?.('', false);
+          onSelectSlicesRef.current?.([]);
+          setSelection(null);
+          onNewSelectionRef.current?.(null);
+          return;
+        }
+      } else {
+        const minX = Math.min(startPos.x, coords.x);
+        const minY = Math.min(startPos.y, coords.y);
+        const w = Math.abs(coords.x - startPos.x) + 1;
+        const h = Math.abs(coords.y - startPos.y) + 1;
+
+        const zoneSlices = (slicesRef.current || []).filter(
+          (s) => s.x < minX + w && s.x + s.width > minX && s.y < minY + h && s.y + s.height > minY
+        );
+
+        if (zoneSlices.length > 0) {
+          const zoneIds = zoneSlices.map((s) => s.id);
+          if (onSelectSlicesRef.current) {
+            onSelectSlicesRef.current(zoneIds);
+          } else {
+            zoneIds.forEach((id) => onSelectSliceRef.current?.(id, true));
+          }
+          let zMinX = Infinity, zMinY = Infinity, zMaxX = -Infinity, zMaxY = -Infinity;
+          zoneSlices.forEach((s) => {
+            zMinX = Math.min(zMinX, s.x);
+            zMinY = Math.min(zMinY, s.y);
+            zMaxX = Math.max(zMaxX, s.x + s.width);
+            zMaxY = Math.max(zMaxY, s.y + s.height);
+          });
+          setSelection({
+            x: zMinX,
+            y: zMinY,
+            w: zMaxX - zMinX,
+            h: zMaxY - zMinY,
+            active: true,
+          });
+          onNewSelectionRef.current?.(null);
+        } else {
+          setSelection({ x: minX, y: minY, w, h, active: true });
+          onNewSelectionRef.current?.({ x: minX, y: minY, width: w, height: h });
+        }
+        return;
+      }
     }
 
     if (!isDrawing || !startPos) {
@@ -1200,18 +1377,14 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       return;
     }
 
-    const coords = getGridCoords(e.clientX, e.clientY);
-    currentCoordsRef.current = coords;
     setIsDrawing(false);
     isDrawingRef.current = false;
     startPosRef.current = null;
     strokeGridRef.current = null;
     setGhost(null);
 
-    if (activeTool === 'select') return;
-
     if (activeTool === 'pencil' || activeTool === 'eraser') {
-      peerSession.saveRoom(gridRef.current, pixelTimestampsRef.current);
+      collaboration?.saveRoom?.(gridRef.current, pixelTimestampsRef.current);
       return;
     }
 
@@ -1259,8 +1432,6 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     const totalW = layout.width;
     const totalH = layout.height;
 
-    // For GIF imports, the ghost grip is anchored at (0, 0)
-    // For single image imports, center on the cursor
     const gripX = isMultiFrame ? 0 : Math.floor(totalW / 2);
     const gripY = isMultiFrame ? 0 : Math.floor(totalH / 2);
 
@@ -1296,8 +1467,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         const offsetX = col * w;
         const offsetY = row * h;
         const framePix = frame.grid.getAllColoredPixels();
-        framePix.forEach(([rx, ry, col]) => {
-          ghostPixels.push([rx + offsetX, ry + offsetY, col]);
+        framePix.forEach(([rx, ry, colVal]) => {
+          ghostPixels.push([rx + offsetX, ry + offsetY, colVal]);
         });
       });
     } else {
@@ -1323,7 +1494,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
   };
 
   // Export handlers
-  const handleExportPNG = (type: 'colored' | 'monochrome' | 'transparent') => {
+  const handleExportPNG = useCallback((type: 'colored' | 'monochrome' | 'transparent') => {
     const bounds =
       selection && selection.active
         ? { minX: selection.x, minY: selection.y, width: selection.w, height: selection.h }
@@ -1382,14 +1553,14 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       a.click();
       URL.revokeObjectURL(url);
     });
-  };
+  }, [grid, selection, activeBgColor, activeDrawColor]);
 
-  const handleExportCArray = () => {
+  const handleExportCArray = useCallback(() => {
     const cCode = grid.toCArray('CUSTOM_DISPLAY_BITMAP');
     setModalContent({ title: 'Export C 1bpp Array (Zephyr / SSD1306)', text: cCode });
-  };
+  }, [grid]);
 
-  const handleExportJSON = () => {
+  const handleExportJSON = useCallback(() => {
     const json = JSON.stringify(
       {
         width: grid.width,
@@ -1401,7 +1572,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       2
     );
     setModalContent({ title: 'Export JSON Project', text: json });
-  };
+  }, [grid]);
 
   const handleSaveJSONFile = useCallback(() => {
     const json = JSON.stringify(
@@ -1441,9 +1612,186 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
     URL.revokeObjectURL(url);
   }, [grid, selection]);
 
-  useEffect(() => {
-    handleSaveJSONFileRef.current = handleSaveJSONFile;
-  }, [handleSaveJSONFile]);
+  // Remote collaboration synchronization handlers
+  const handleRemoteMutation = useCallback(
+    (mutation: CanvasMutationMessage) => {
+      if (mutation.type === 'clear') {
+        const now = mutation.timestamp ?? Date.now();
+        pixelTimestampsRef.current.clear(now);
+        const next = gridRef.current.clone();
+        next.clear();
+        if (strokeGridRef.current) {
+          strokeGridRef.current.clear();
+        }
+        gridRef.current = next;
+        setGrid(next);
+        collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
+        return;
+      }
+      if (mutation.type === 'pixels') {
+        const next = gridRef.current.clone();
+        applyPixelDeltas(next, mutation.pixels, pixelTimestampsRef.current);
+        if (strokeGridRef.current) {
+          applyPixelDeltas(strokeGridRef.current, mutation.pixels, pixelTimestampsRef.current);
+        }
+        gridRef.current = next;
+        setGrid(next);
+        collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
+      }
+    },
+    [setGrid, collaboration]
+  );
+
+  const handleRemoteSnapshot = useCallback(
+    (snapshot: CanvasSnapshotMessage) => {
+      if (!snapshot || !Array.isArray(snapshot.pixels)) return;
+      const currentGrid = gridRef.current;
+      const isDiscard = discardLocalOnNextSnapshotRef.current;
+      discardLocalOnNextSnapshotRef.current = false;
+
+      if (isDiscard || currentGrid.countOn() === 0) {
+        const next = new PixelGrid(
+          snapshot.width || currentGrid.width,
+          snapshot.height || currentGrid.height,
+          undefined,
+          undefined,
+          activeDrawColor
+        );
+        pixelTimestampsRef.current.clear(snapshot.clearTimestamp ?? snapshot.timestamp ?? Date.now());
+        for (const p of snapshot.pixels) {
+          next.set(p[0], p[1], 1, p[2]);
+          const ts = p[3] ?? snapshot.timestamp ?? 0;
+          pixelTimestampsRef.current.set(p[0], p[1], ts);
+        }
+        if (strokeGridRef.current) {
+          strokeGridRef.current = next.clone();
+        }
+        gridRef.current = next;
+        setGrid(next);
+        collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
+        return;
+      }
+
+      const next = currentGrid.clone();
+      const result = reconcileGridSnapshots(next, pixelTimestampsRef.current, snapshot);
+      if (result.appliedDeltas.length > 0) {
+        if (strokeGridRef.current) {
+          strokeGridRef.current = next.clone();
+        }
+        gridRef.current = next;
+        setGrid(next);
+        collaboration?.saveRoom?.(next, pixelTimestampsRef.current);
+      }
+    },
+    [activeDrawColor, setGrid, collaboration]
+  );
+
+  const handleGetSnapshot = useCallback((): CanvasSnapshotMessage => {
+    const pixelsWithTs: [number, number, string, number][] = [];
+    gridRef.current.forEachPixel((x, y, color) => {
+      const ts = pixelTimestampsRef.current.get(x, y);
+      pixelsWithTs.push([x, y, color, ts]);
+    });
+    const deletedPixels: [number, number, number][] = [];
+    const clearTs = pixelTimestampsRef.current.getClearTime();
+    for (const [key, ts] of pixelTimestampsRef.current.getMap().entries()) {
+      const [x, y] = unpackCoord(key);
+      if (!gridRef.current.get(x, y) && ts > clearTs) {
+        deletedPixels.push([x, y, ts]);
+      }
+    }
+    return {
+      type: 'snapshot',
+      width: gridRef.current.width,
+      height: gridRef.current.height,
+      pixels: pixelsWithTs,
+      deletedPixels: deletedPixels.length > 0 ? deletedPixels : undefined,
+      count: gridRef.current.countOn(),
+      timestamp: Date.now(),
+      clearTimestamp: clearTs,
+    };
+  }, []);
+
+  const handleRestoreSnapshot = useCallback(
+    (snapshot: RoomSnapshotData) => {
+      const next = new PixelGrid(
+        snapshot.width,
+        snapshot.height,
+        undefined,
+        undefined,
+        activeDrawColor
+      );
+      pixelTimestampsRef.current.clear(snapshot.updatedAt || Date.now());
+      for (const p of snapshot.pixels) {
+        if (p && p[2] && p[2] !== 'transparent' && p[2] !== 'none') {
+          next.set(p[0], p[1], 1, p[2]);
+        }
+        if (typeof p[3] === 'number') {
+          pixelTimestampsRef.current.set(p[0], p[1], p[3]);
+        }
+      }
+      gridRef.current = next;
+      resetGrid(next);
+      setGhost(null);
+      setSelection(null);
+      setFloatingPixels(null);
+      if (strokeGridRef.current) {
+        strokeGridRef.current = null;
+      }
+      fitToView(next);
+    },
+    [activeDrawColor, resetGrid, fitToView, setSelection, setFloatingPixels]
+  );
+
+  // Imperative handle for parent wrapper / ref consumers
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      getGrid: () => gridRef.current,
+      setGrid: (g: BwpxGrid) => {
+        gridRef.current = g;
+        setGrid(g);
+      },
+      resetGrid: (g: BwpxGrid) => {
+        gridRef.current = g;
+        resetGrid(g);
+      },
+      commitGrid: (g: BwpxGrid) => {
+        commitAndBroadcast(g);
+      },
+      applyRemoteMutation: handleRemoteMutation,
+      applyRemoteSnapshot: handleRemoteSnapshot,
+      getSnapshot: handleGetSnapshot,
+      restoreSnapshot: handleRestoreSnapshot,
+      discardLocalConflict: () => {
+        discardLocalOnNextSnapshotRef.current = true;
+      },
+      fitToScreen: handleFitToScreen,
+      openImportModal: () => setIsImportModalOpen(true),
+      exportPNG: handleExportPNG,
+      exportCArray: handleExportCArray,
+      exportJSON: handleExportJSON,
+      saveJSONFile: handleSaveJSONFile,
+      downloadCHeader: handleDownloadCHeader,
+      getSelectionBounds: () => (selection && selection.active ? { width: selection.w, height: selection.h } : null),
+    }),
+    [
+      handleRemoteMutation,
+      handleRemoteSnapshot,
+      handleGetSnapshot,
+      handleRestoreSnapshot,
+      handleFitToScreen,
+      handleExportPNG,
+      handleExportCArray,
+      handleExportJSON,
+      handleSaveJSONFile,
+      handleDownloadCHeader,
+      commitAndBroadcast,
+      selection,
+      setGrid,
+      resetGrid,
+    ]
+  );
 
   return (
     <div
@@ -1497,8 +1845,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         historyLength={historyLength}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        onNewCanvas={handleNewCanvas}
-        onOpenLoadModal={peerSession.openLoadModal}
+        onNewCanvas={collaboration?.onNewCanvas ?? handleNewCanvas}
+        onOpenLoadModal={collaboration?.onOpenLoadModal ?? handleOpenImportDialog}
         brushSize={brushSize}
         setBrushSize={setBrushSize}
         onRotate90={handleRotate90}
@@ -1521,8 +1869,9 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onDownloadCHeader={handleDownloadCHeader}
         selectionBounds={selection && selection.active ? { width: selection.w, height: selection.h } : null}
         canvasDimensions={{ width: grid.width, height: grid.height }}
-        onOpenShareModal={peerSession.openShareModal}
-        connectedPeers={peerSession.connectedPeers}
+        onOpenShareModal={collaboration?.onOpenShareModal}
+        connectedPeers={collaboration?.connectedPeers}
+        showCollaboration={Boolean(collaboration)}
       />
 
       {/* 2. MAIN WORKSPACE */}
@@ -1532,6 +1881,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
           setActiveTool={setActiveTool}
           activeDrawColor={activeDrawColor}
           activePixelColor={activePixelColor}
+          isStrictMonochrome={isStrictMonochrome}
         />
 
         <EditorCanvas
@@ -1554,14 +1904,8 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
           onWheel={handleWheel}
         />
 
-        {/* Room Joining Gate Overlay (blocks canvas when joining unconfirmed rooms) */}
-        <RoomJoiningOverlay
-          status={peerSession.roomJoinStatus}
-          roomName={peerSession.roomId}
-          onRetry={peerSession.retryJoinRoom}
-          onNewCanvas={handleNewCanvas}
-          accentColor={activePixelColor}
-        />
+        {/* Room Joining Gate Overlay (if provided by collaborative wrapper) */}
+        {collaboration?.overlaySlot}
       </div>
 
       {/* 3. BOTTOM STATUS BAR */}
@@ -1572,12 +1916,12 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         zoom={zoom}
         onZoomChange={zoomTo}
         onFitToScreen={handleFitToScreen}
-        isRoomActive={peerSession.isRoomActiveInUrl}
-        roomId={peerSession.roomId}
-        peerCount={peerSession.connectedPeers.length}
-        statusEvents={peerSession.statusEvents}
-        onClearStatusEvents={peerSession.clearStatusEvents}
-        onOpenInvite={peerSession.openShareModal}
+        isRoomActive={collaboration?.isRoomActive}
+        roomId={collaboration?.roomId}
+        peerCount={collaboration?.connectedPeers?.length ?? 0}
+        statusEvents={collaboration?.statusEvents}
+        onClearStatusEvents={collaboration?.onClearStatusEvents}
+        onOpenInvite={collaboration?.onOpenInvite}
       />
 
       {/* Image & GIF Import Modal */}
@@ -1634,54 +1978,6 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
         onClose={() => setModalContent(null)}
       />
 
-      {/* Share / Collaborative Canvas Modal */}
-      <ShareModal
-        isOpen={peerSession.isShareModalOpen}
-        onClose={peerSession.closeShareModal}
-        profile={peerSession.profile}
-        onUpdateProfile={peerSession.updateProfile}
-        onRandomizeName={peerSession.randomizeName}
-        onRandomizeColor={peerSession.randomizeColor}
-        onRandomizeProfile={peerSession.randomizeProfile}
-        roomId={peerSession.roomId}
-        roomUuid={peerSession.roomUuid}
-        shareUrl={peerSession.getShareUrl()}
-        onGenerateNewRoom={peerSession.generateNewRoom}
-        connectedPeers={peerSession.connectedPeers}
-        savedRooms={peerSession.savedRooms}
-        onRestoreRoom={handleLoadRoom}
-        onCopyToNewSave={handleCopyToNewSave}
-        onDeleteRoom={peerSession.deleteRoom}
-      />
-
-      {/* Saved Rooms / Storage Modal with Import & Export */}
-      <RoomStorageModal
-        isOpen={peerSession.isLoadModalOpen}
-        onClose={peerSession.closeLoadModal}
-        savedRooms={peerSession.savedRooms}
-        currentRoomId={peerSession.roomId}
-        connectedPeers={peerSession.connectedPeers}
-        onLoadRoom={handleLoadRoom}
-        onCopyToNewSave={handleCopyToNewSave}
-        onDeleteRoom={peerSession.deleteRoom}
-        onOpenImportModal={handleOpenImportDialog}
-        onExportPNG={handleExportPNG}
-        onExportCArray={handleExportCArray}
-        onExportJSON={handleExportJSON}
-        onSaveJSONFile={handleSaveJSONFile}
-        onDownloadCHeader={handleDownloadCHeader}
-        selectionBounds={selection && selection.active ? { width: selection.w, height: selection.h } : null}
-        canvasDimensions={{ width: grid.width, height: grid.height }}
-      />
-
-      {/* Room ID Conflict Resolution Modal */}
-      <RoomConflictModal
-        isOpen={peerSession.isConflictModalOpen}
-        conflict={peerSession.conflictInfo}
-        onDiscardLocalAndJoin={peerSession.resolveConflictDiscardLocalAndJoin}
-        onKeepLocal={peerSession.resolveConflictKeepLocal}
-      />
-
       {/* Hidden File Input for Image Import Dialog */}
       <input
         ref={fileInputRef}
@@ -1693,7 +1989,7 @@ export const PixelEditor: React.FC<PixelEditorProps> = ({
       />
     </div>
   );
-};
+});
 
 export const BwpxEditor = PixelEditor;
 export const ScyanPixelEditor = PixelEditor;

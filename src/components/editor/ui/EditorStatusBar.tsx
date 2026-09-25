@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Maximize2, Users, WifiOff, Activity, Trash2, X, Share2 } from 'lucide-react';
-import type { ToolType } from '../types';
 import type { BwpxGrid } from '../../../core/PixelGrid';
 import type { SelectionOverlay } from '../../../core/gridRenderer';
-import type { PeerStatusEvent } from '../hooks/usePeerSession';
+import type { ToolType, PeerStatusEvent } from '../types';
 
 export interface EditorStatusBarProps {
   hoverPos: { x: number; y: number } | null;

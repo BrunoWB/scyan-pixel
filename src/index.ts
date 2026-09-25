@@ -1,5 +1,33 @@
-export { PixelEditor, PixelEditor as BwpxEditor, PixelEditor as ScyanPixelEditor, WHEEL_ZOOM_THRESHOLD, processWheelZoomDelta } from './components/PixelEditor';
-export type { PixelEditorProps, BwpxEditorProps, BwpxEditorProps as ScyanPixelEditorProps, ToolType, ThemePreset } from './components/PixelEditor';
+export {
+  PixelEditor,
+  PixelEditor as BwpxEditor,
+  WHEEL_ZOOM_THRESHOLD,
+  processWheelZoomDelta,
+  calculateFitViewport,
+  calculateZoomAtPoint,
+  ZOOM_STEPS,
+} from './components/PixelEditor';
+export {
+  CollaborativePixelEditor,
+  CollaborativePixelEditor as ScyanPixelEditor,
+} from './components/CollaborativePixelEditor';
+export type {
+  PixelEditorProps,
+  BwpxEditorProps,
+  BwpxEditorProps as ScyanPixelEditorProps,
+  ToolType,
+  ThemePreset,
+  SpriteSlice,
+  EditorViewport,
+  PixelEditorHandle,
+  PixelEditorCollaborationProps,
+} from './components/editor/types';
+export type { CollaborativePixelEditorProps } from './components/CollaborativePixelEditor';
+export {
+  PixelOverlayCanvas,
+  PixelOverlayCanvas as BwpxOverlayCanvas,
+} from './components/PixelOverlayCanvas';
+export type { PixelOverlayCanvasProps, BwpxOverlayCanvasProps } from './components/PixelOverlayCanvas';
 export { ImageImportModal } from './components/ImageImportModal';
 export type { ImageImportModalProps } from './components/ImageImportModal';
 export { ColorPicker, ColorTriangle, TRIANGLE_POINTS, TRIANGLE_POINTS_CENTERED } from './components/ColorPicker';
@@ -16,3 +44,4 @@ export * from './core/algorithms';
 export * from './core/gridRenderer';
 export * from './core/gifDecoder';
 export * from './core/imageConversion';
+export * from './core/canvasPacking';

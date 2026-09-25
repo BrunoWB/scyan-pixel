@@ -30,43 +30,9 @@ export interface PeerProfile {
   color: string;
 }
 
-export interface ConnectedPeer {
-  id: string;
-  name: string;
-  color: string;
-  isSelf?: boolean;
-  joinedAt?: number;
-}
+export type { ConnectedPeer } from '../../components/editor/types';
+export { getPeerInitials } from '../../components/editor/types';
 
-/**
- * Extract 2-letter profile initials:
- * - If name has hyphen, space, or delimiter: first letter of each part (e.g. "montreal-wolf" -> "MW").
- * - If manual input has no hyphen or space: first 2 letters (e.g. "Scyan" -> "SC").
- * - If 1 letter: that single uppercase letter.
- * - Empty fallback: empty string "".
- */
-export function getPeerInitials(name: string): string {
-  if (!name) return '';
-  const trimmed = name.trim().replace(/^[\s\-_]+|[\s\-_]+$/g, '');
-  if (!trimmed) return '';
-
-  const parts = trimmed.split(/[\s\-_]+/).filter(Boolean);
-
-  if (parts.length >= 2) {
-    const first = parts[0].match(/\p{L}/u)?.[0] || parts[0][0] || '';
-    const second = parts[parts.length - 1].match(/\p{L}/u)?.[0] || parts[parts.length - 1][0] || '';
-    return (first + second).toUpperCase();
-  }
-
-  // No hyphen or space: use 2 first letters
-  const letters = trimmed.match(/\p{L}/gu);
-  if (letters && letters.length >= 2) {
-    return (letters[0] + letters[1]).toUpperCase();
-  }
-
-  const single = parts[0] || trimmed;
-  return single.slice(0, 2).toUpperCase();
-}
 
 /**
  * Validates that peer name has at least 2 letters minimum (Unicode letters supported).

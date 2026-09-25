@@ -41,6 +41,7 @@ export interface RenderBaseOptions {
   showAxes?: boolean;
   slices?: SliceOverlay[];
   selectedSliceId?: string;
+  selectedSliceIds?: string[];
   frameBounds?: { x: number; y: number; w: number; h: number } | null;
 }
 
@@ -197,6 +198,12 @@ export function renderBaseCanvas(
     const labelMarginTop = zoom >= 6 ? 18 : 0;
     const labelWidthMargin = zoom >= 6 ? 220 : 0;
 
+    const selectedIdsSet = new Set<string>();
+    if (selectedSliceId) selectedIdsSet.add(selectedSliceId);
+    if (options.selectedSliceIds) {
+      options.selectedSliceIds.forEach((id) => selectedIdsSet.add(id));
+    }
+
     slices.forEach((s) => {
       const sx = Math.round(s.x * zoom);
       const sy = Math.round(s.y * zoom);
@@ -212,7 +219,7 @@ export function renderBaseCanvas(
         return;
       }
 
-      const isSelected = selectedSliceId === s.id;
+      const isSelected = selectedIdsSet.has(s.id);
       ctx.strokeStyle = isSelected ? '#c084fc' : s.color || 'rgba(168, 85, 247, 0.45)';
       ctx.lineWidth = isSelected ? 2 : 1;
       if (!isSelected) {

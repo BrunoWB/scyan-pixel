@@ -1,5 +1,5 @@
 import React from 'react';
-import { getPeerInitials } from '../../../core/peer/peerIdentity';
+import { getPeerInitials } from '../types';
 import { getContrastColor } from '../../../core/colorUtils';
 
 export type PeerAvatarSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';

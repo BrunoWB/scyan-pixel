@@ -301,69 +301,91 @@ export class PixelGrid {
     }
   }
 
-  invert(bounds?: { minX: number; minY: number; width: number; height: number }): PixelGrid {
+  invert(
+    bounds?: { minX?: number; minY?: number; width?: number; height?: number; x?: number; y?: number; w?: number; h?: number },
+    color?: string
+  ): PixelGrid {
     const next = this.clone();
-    const b = bounds || {
-      minX: 0,
-      minY: 0,
-      width: this.width,
-      height: this.height,
-    };
+    const minX = bounds ? (bounds.minX ?? bounds.x ?? 0) : 0;
+    const minY = bounds ? (bounds.minY ?? bounds.y ?? 0) : 0;
+    const width = bounds ? (bounds.width ?? bounds.w ?? this.width) : this.width;
+    const height = bounds ? (bounds.height ?? bounds.h ?? this.height) : this.height;
 
-    for (let y = 0; y < b.height; y++) {
-      for (let x = 0; x < b.width; x++) {
-        const curX = b.minX + x;
-        const curY = b.minY + y;
-        next.set(curX, curY, next.get(curX, curY) ? 0 : 1);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const curX = minX + x;
+        const curY = minY + y;
+        const isSet = next.get(curX, curY);
+        next.set(curX, curY, isSet ? 0 : 1, color || this.defaultColor);
       }
     }
     return next;
   }
 
-  flipH(bounds?: { minX: number; minY: number; width: number; height: number }): PixelGrid {
+  flipH(bounds?: { minX?: number; minY?: number; width?: number; height?: number; x?: number; y?: number; w?: number; h?: number }): PixelGrid {
     const next = this.clone();
-    const b = bounds || this.getBounds();
-    if (b.width <= 0 || b.height <= 0) return next;
+    const gb = this.getBounds();
+    const minX = bounds ? (bounds.minX ?? bounds.x ?? gb.minX) : gb.minX;
+    const minY = bounds ? (bounds.minY ?? bounds.y ?? gb.minY) : gb.minY;
+    const width = bounds ? (bounds.width ?? bounds.w ?? gb.width) : gb.width;
+    const height = bounds ? (bounds.height ?? bounds.h ?? gb.height) : gb.height;
+    if (width <= 0 || height <= 0) return next;
 
-    const extracted = this.extractColoredRect({ x: b.minX, y: b.minY, w: b.width, h: b.height });
-    next.clearRect({ x: b.minX, y: b.minY, w: b.width, h: b.height });
+    const extracted = this.extractColoredRect({ x: minX, y: minY, w: width, h: height });
+    next.clearRect({ x: minX, y: minY, w: width, h: height });
 
     extracted.forEach(([dx, dy, color]) => {
-      const flippedDx = b.width - 1 - dx;
-      next.set(b.minX + flippedDx, b.minY + dy, color);
+      const flippedDx = width - 1 - dx;
+      next.set(minX + flippedDx, minY + dy, color);
     });
 
     return next;
   }
 
-  flipV(bounds?: { minX: number; minY: number; width: number; height: number }): PixelGrid {
-    const next = this.clone();
-    const b = bounds || this.getBounds();
-    if (b.width <= 0 || b.height <= 0) return next;
+  flipHorizontal(bounds?: { minX?: number; minY?: number; width?: number; height?: number; x?: number; y?: number; w?: number; h?: number }): PixelGrid {
+    return this.flipH(bounds);
+  }
 
-    const extracted = this.extractColoredRect({ x: b.minX, y: b.minY, w: b.width, h: b.height });
-    next.clearRect({ x: b.minX, y: b.minY, w: b.width, h: b.height });
+  flipV(bounds?: { minX?: number; minY?: number; width?: number; height?: number; x?: number; y?: number; w?: number; h?: number }): PixelGrid {
+    const next = this.clone();
+    const gb = this.getBounds();
+    const minX = bounds ? (bounds.minX ?? bounds.x ?? gb.minX) : gb.minX;
+    const minY = bounds ? (bounds.minY ?? bounds.y ?? gb.minY) : gb.minY;
+    const width = bounds ? (bounds.width ?? bounds.w ?? gb.width) : gb.width;
+    const height = bounds ? (bounds.height ?? bounds.h ?? gb.height) : gb.height;
+    if (width <= 0 || height <= 0) return next;
+
+    const extracted = this.extractColoredRect({ x: minX, y: minY, w: width, h: height });
+    next.clearRect({ x: minX, y: minY, w: width, h: height });
 
     extracted.forEach(([dx, dy, color]) => {
-      const flippedDy = b.height - 1 - dy;
-      next.set(b.minX + dx, b.minY + flippedDy, color);
+      const flippedDy = height - 1 - dy;
+      next.set(minX + dx, minY + flippedDy, color);
     });
 
     return next;
   }
 
-  rotate90(bounds?: { minX: number; minY: number; width: number; height: number }): PixelGrid {
-    const next = this.clone();
-    const b = bounds || this.getBounds();
-    if (b.width <= 0 || b.height <= 0) return next;
+  flipVertical(bounds?: { minX?: number; minY?: number; width?: number; height?: number; x?: number; y?: number; w?: number; h?: number }): PixelGrid {
+    return this.flipV(bounds);
+  }
 
-    const extracted = this.extractColoredRect({ x: b.minX, y: b.minY, w: b.width, h: b.height });
-    next.clearRect({ x: b.minX, y: b.minY, w: b.width, h: b.height });
+  rotate90(bounds?: { minX?: number; minY?: number; width?: number; height?: number; x?: number; y?: number; w?: number; h?: number }): PixelGrid {
+    const next = this.clone();
+    const gb = this.getBounds();
+    const minX = bounds ? (bounds.minX ?? bounds.x ?? gb.minX) : gb.minX;
+    const minY = bounds ? (bounds.minY ?? bounds.y ?? gb.minY) : gb.minY;
+    const width = bounds ? (bounds.width ?? bounds.w ?? gb.width) : gb.width;
+    const height = bounds ? (bounds.height ?? bounds.h ?? gb.height) : gb.height;
+    if (width <= 0 || height <= 0) return next;
+
+    const extracted = this.extractColoredRect({ x: minX, y: minY, w: width, h: height });
+    next.clearRect({ x: minX, y: minY, w: width, h: height });
 
     extracted.forEach(([dx, dy, color]) => {
-      const newDx = b.height - 1 - dy;
+      const newDx = height - 1 - dy;
       const newDy = dx;
-      next.set(b.minX + newDx, b.minY + newDy, color);
+      next.set(minX + newDx, minY + newDy, color);
     });
 
     return next;

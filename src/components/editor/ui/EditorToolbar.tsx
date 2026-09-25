@@ -23,6 +23,7 @@ export interface EditorToolbarProps {
   setActiveTool: (tool: ToolType) => void;
   activeDrawColor: string;
   activePixelColor: string;
+  isStrictMonochrome?: boolean;
 }
 
 const FilledArrowIcon: React.FC<{ className?: string }> = ({ className = 'w-3.5 h-3.5' }) => (
@@ -45,6 +46,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   setActiveTool,
   activeDrawColor,
   activePixelColor,
+  isStrictMonochrome = false,
 }) => {
   return (
     <aside className="w-13 bg-[#12141a] border-r border-[#202530] flex flex-col items-center py-2.5 gap-3 z-10 overflow-y-auto">
@@ -100,21 +102,23 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
           <PaintBucket className="w-3.5 h-3.5" />
         </button>
 
-        <button
-          onClick={() => setActiveTool('eyedropper')}
-          className={`w-8 h-8 rounded flex items-center justify-center transition cursor-pointer ${
-            activeTool === 'eyedropper'
-              ? 'shadow-md ring-1 ring-white/30'
-              : 'text-slate-400 hover:bg-[#202530] hover:text-white'
-          }`}
-          style={{
-            backgroundColor: activeTool === 'eyedropper' ? activeDrawColor : 'transparent',
-            color: activeTool === 'eyedropper' ? getContrastColor(activeDrawColor) : undefined,
-          }}
-          title="Eyedropper (I) - Sample color from canvas"
-        >
-          <Pipette className="w-3.5 h-3.5" />
-        </button>
+        {!isStrictMonochrome && (
+          <button
+            onClick={() => setActiveTool('eyedropper')}
+            className={`w-8 h-8 rounded flex items-center justify-center transition cursor-pointer ${
+              activeTool === 'eyedropper'
+                ? 'shadow-md ring-1 ring-white/30'
+                : 'text-slate-400 hover:bg-[#202530] hover:text-white'
+            }`}
+            style={{
+              backgroundColor: activeTool === 'eyedropper' ? activeDrawColor : 'transparent',
+              color: activeTool === 'eyedropper' ? getContrastColor(activeDrawColor) : undefined,
+            }}
+            title="Eyedropper (I) - Sample color from canvas"
+          >
+            <Pipette className="w-3.5 h-3.5" />
+          </button>
+        )}
 
         <button
           onClick={() => setActiveTool('select')}

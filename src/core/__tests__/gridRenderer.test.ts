@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { renderOverlayCanvas, type GhostOverlay, type SelectionOverlay } from '../gridRenderer';
+import { PixelGrid } from '../PixelGrid';
+import {
+  renderOverlayCanvas,
+  renderBaseCanvas,
+  type GhostOverlay,
+  type SelectionOverlay,
+  type SliceOverlay,
+} from '../gridRenderer';
 
 function createMockCanvasAndContext() {
   const canvas = {
@@ -22,6 +29,12 @@ function createMockCanvasAndContext() {
     clearRect: vi.fn((x: number, y: number, w: number, h: number) =>
       calls.push({ method: 'clearRect', args: [x, y, w, h] })
     ),
+    beginPath: vi.fn(() => calls.push({ method: 'beginPath', args: [] })),
+    moveTo: vi.fn((x: number, y: number) => calls.push({ method: 'moveTo', args: [x, y] })),
+    lineTo: vi.fn((x: number, y: number) => calls.push({ method: 'lineTo', args: [x, y] })),
+    arc: vi.fn((...args: unknown[]) => calls.push({ method: 'arc', args })),
+    fill: vi.fn(() => calls.push({ method: 'fill', args: [] })),
+    stroke: vi.fn(() => calls.push({ method: 'stroke', args: [] })),
     setLineDash: vi.fn((dash: number[]) => calls.push({ method: 'setLineDash', args: [dash] })),
     fillText: vi.fn(),
     measureText: vi.fn(() => ({ width: 10 })),
@@ -125,4 +138,41 @@ describe('renderOverlayCanvas', () => {
     expect(strokeCalls[0].args).toEqual([20.5, 30.5, 40, 50]);
   });
 });
+
+describe('renderBaseCanvas slices', () => {
+  it('highlights all slices in selectedSliceIds with solid border and glow', () => {
+    const { canvas, ctx, calls } = createMockCanvasAndContext();
+    const grid = new PixelGrid(32, 32);
+
+    const slices: SliceOverlay[] = [
+      { id: 'slice_1', name: 'Slice 1', x: 0, y: 0, width: 8, height: 8 },
+      { id: 'slice_2', name: 'Slice 2', x: 10, y: 0, width: 8, height: 8 },
+      { id: 'slice_3', name: 'Slice 3', x: 20, y: 0, width: 8, height: 8 },
+    ];
+
+    renderBaseCanvas(canvas, ctx, {
+      grid,
+      zoom: 10,
+      pan: { x: 0, y: 0 },
+      slices,
+      selectedSliceIds: ['slice_1', 'slice_3'],
+    });
+
+    // Check that strokeRect was called 3 times (once per slice)
+    const strokeCalls = calls.filter((c) => c.method === 'strokeRect');
+    expect(strokeCalls).toHaveLength(3);
+
+    // Line dash calls: empty dash [] indicates selected solid line, [3, 3] indicates unselected dashed line
+    const dashCalls = calls.filter((c) => c.method === 'setLineDash');
+    // For each slice, there is setLineDash for the slice border, plus a reset after each slice
+    // Slice 1: selected -> []
+    // Slice 2: unselected -> [3, 3]
+    // Slice 3: selected -> []
+    const borderDashCalls = dashCalls.filter((c) => Array.isArray(c.args[0]) && (c.args[0] as number[]).length > 0);
+    // Only slice 2 should have had [3, 3] dashed line
+    expect(borderDashCalls).toHaveLength(1);
+    expect(borderDashCalls[0].args[0]).toEqual([3, 3]);
+  });
+});
+
 

@@ -2,31 +2,65 @@ import { useState, useRef, useEffect, useCallback, type RefObject } from 'react'
 import type { BwpxGrid } from '../../../core/PixelGrid';
 import { processWheelZoomDelta } from '../types';
 
+import type { EditorViewport } from '../types';
+
 export interface UseViewportOptions {
   containerRef: RefObject<HTMLDivElement | null>;
   initialZoom?: number;
   initialPan?: { x: number; y: number };
+  initialViewport?: EditorViewport;
+  onViewportChange?: (viewport: EditorViewport) => void;
 }
 
 export function useViewport({
   containerRef,
   initialZoom = 10,
   initialPan = { x: 60, y: 60 },
+  initialViewport,
+  onViewportChange,
 }: UseViewportOptions) {
-  const [zoom, setZoom] = useState<number>(initialZoom);
-  const [pan, setPan] = useState<{ x: number; y: number }>(initialPan);
+  const [zoom, setZoom] = useState<number>(() => initialViewport?.zoom ?? initialZoom);
+  const [pan, setPan] = useState<{ x: number; y: number }>(() => initialViewport?.pan ?? initialPan);
   const [isSpaceHeld, setIsSpaceHeld] = useState<boolean>(false);
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const hasInitializedViewRef = useRef(false);
+  const hasInitializedViewRef = useRef<boolean>(Boolean(initialViewport));
   const wheelDeltaRef = useRef<number>(0);
   const wheelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initialize viewport once on entry: 0,0 in center of top-left quadrant
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+  const debouncedViewportNotifyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const notifyViewportChange = useCallback((z: number, p: { x: number; y: number }) => {
+    if (!onViewportChangeRef.current) return;
+    if (debouncedViewportNotifyRef.current) {
+      clearTimeout(debouncedViewportNotifyRef.current);
+    }
+    debouncedViewportNotifyRef.current = setTimeout(() => {
+      onViewportChangeRef.current?.({ zoom: z, pan: p });
+    }, 120);
+  }, []);
+
+  useEffect(() => {
+    notifyViewportChange(zoom, pan);
+  }, [zoom, pan, notifyViewportChange]);
+
+  const prevInitialViewportRef = useRef(initialViewport);
+  useEffect(() => {
+    if (initialViewport && initialViewport !== prevInitialViewportRef.current) {
+      prevInitialViewportRef.current = initialViewport;
+      setZoom(initialViewport.zoom);
+      setPan(initialViewport.pan);
+      hasInitializedViewRef.current = true;
+    }
+  }, [initialViewport]);
+
+  // Initialize viewport once on entry: 0,0 in center of top-left quadrant (if not provided via initialViewport)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || hasInitializedViewRef.current) return;
 
     const initView = () => {
       if (hasInitializedViewRef.current) return;
@@ -53,14 +87,18 @@ export function useViewport({
     return () => ro.disconnect();
   }, [containerRef]);
 
-  // Cleanup wheel timeout on unmount
+  // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
       if (wheelTimeoutRef.current) {
         clearTimeout(wheelTimeoutRef.current);
       }
+      if (debouncedViewportNotifyRef.current) {
+        clearTimeout(debouncedViewportNotifyRef.current);
+      }
     };
   }, []);
+
 
   // Fit viewport to artwork bounds or reset to top-left quadrant center
   const fitToView = useCallback(

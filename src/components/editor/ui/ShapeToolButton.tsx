@@ -34,7 +34,7 @@ export interface ShapeToolButtonProps {
 
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
-  activeDrawColor: string;
+  activeDrawColor?: string;
 }
 
 export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
@@ -57,7 +57,7 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
   secondaryLabel,
   activeTool,
   setActiveTool,
-  activeDrawColor,
+  activeDrawColor = '#00e5a3',
 }) => {
   const allVariants: ToolVariant[] = variants ?? [
     {
@@ -153,9 +153,9 @@ export const ShapeToolButton: React.FC<ShapeToolButtonProps> = ({
         onClick={handleMainClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className={`w-8 h-8 rounded flex items-center justify-center transition cursor-pointer relative ${
+        className={`bwpx-tool-btn w-8 h-8 rounded flex items-center justify-center transition cursor-pointer relative ${
           isActive
-            ? 'shadow-md ring-1 ring-white/30'
+            ? 'active shadow-md ring-1 ring-white/30'
             : 'text-slate-400 hover:bg-[#202530] hover:text-white'
         }`}
         style={{

@@ -48,13 +48,8 @@ export interface UsePeerSessionOptions {
   joinTimeoutMs?: number;
 }
 
-export interface PeerStatusEvent {
-  id: string;
-  timestamp: number;
-  type: 'info' | 'peer_join' | 'peer_leave' | 'sync' | 'save' | 'conflict';
-  message: string;
-  peerName?: string;
-}
+import type { PeerStatusEvent } from '../types';
+export type { PeerStatusEvent };
 
 export interface UsePeerSessionReturn {
   profile: PeerProfile;
