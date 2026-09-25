@@ -308,6 +308,7 @@ export interface PixelEditorProps {
   showNewButton?: boolean;
   loadButtonLabel?: string;
   loadButtonIcon?: 'upload' | 'folder' | 'import';
+  allowImportColor?: boolean;
 }
 
 export type BwpxEditorProps = PixelEditorProps;

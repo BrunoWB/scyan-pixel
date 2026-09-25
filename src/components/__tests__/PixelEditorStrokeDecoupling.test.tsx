@@ -195,4 +195,18 @@ describe('PixelEditor live stroke decoupling and history atomicity', () => {
     expect(html).toContain('Load');
     expect(html).toContain('title="Load Saved Room, Import and Export"');
   });
+
+  it('enforces monochrome-only import in atlas or monochrome mode without color options', () => {
+    const html = renderToString(
+      <PixelEditor
+        isAtlas={true}
+        initialWidth={32}
+        initialHeight={32}
+      />
+    );
+
+    // In atlas mode, color options/mode toggle are excluded from the import modal
+    expect(html).not.toContain('image-import-mode-toggle');
+    expect(html).not.toContain('Max Colors');
+  });
 });

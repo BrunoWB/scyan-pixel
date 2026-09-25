@@ -109,6 +109,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
     showNewButton,
     loadButtonLabel,
     loadButtonIcon,
+    allowImportColor,
   },
   forwardedRef
 ) {
@@ -120,6 +121,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
   const effectiveLoadButtonIcon = loadButtonIcon ?? (isAtlasMode ? 'upload' : 'folder');
   // 1. Color & Theme State
   const isStrictMonochrome = Boolean(colorMode === 'monochrome' || (propPixelColor && !allowColorThemes));
+  const effectiveAllowImportColor = allowImportColor ?? (!isStrictMonochrome && !isAtlasMode);
   const customPixelColor = propPixelColor || (isStrictMonochrome ? '#ffffff' : defaultPixelColor);
   const [customBgColor, setCustomBgColor] = useState<string>(
     propBgColor || (isStrictMonochrome ? '#000000' : defaultBgColor)
@@ -2074,6 +2076,7 @@ export const PixelEditor = forwardRef<PixelEditorHandle, PixelEditorProps>(funct
         canvasHeight={grid.height}
         pixelColor={activePixelColor}
         bgColor={activeBgColor}
+        allowColor={effectiveAllowImportColor}
         onClose={() => {
           setIsImportModalOpen(false);
           setImportSource(null);
